@@ -27,7 +27,7 @@ async function parseList(x) {
     .filter(Boolean);
 }
 
-// 优化 C：更稳、更高效的原生 Base64 编码，完美兼容 UTF-8
+// 原生 Base64 编码，完美兼容 UTF-8 中文
 function b64(s) {
   return btoa(unescape(encodeURIComponent(s)));
 }
@@ -57,15 +57,23 @@ async function fto(u, ms) {
   }
 }
 
+// 延长超时、增加 UA 伪装、自动补全 https
 async function fetchAPI(arr) {
   if (!arr.length) return [];
   const out = [];
   await Promise.allSettled(
     arr.map(async (u) => {
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 2500);
+      const t = setTimeout(() => c.abort(), 5000); 
       try {
-        const r = await fetch(u, { signal: c.signal, headers: { Accept: "text/plain,*/*" } });
+        const fetchUrl = u.startsWith("http") ? u : "https://" + u;
+        const r = await fetch(fetchUrl, { 
+          signal: c.signal, 
+          headers: { 
+            "Accept": "text/plain,*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          } 
+        });
         if (!r.ok) return;
         (await r.text())
           .split(/\r?\n/)
@@ -88,9 +96,16 @@ async function fetchCSV(arr, tls, dls, rmk) {
   await Promise.allSettled(
     arr.map(async (u) => {
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 3500);
+      const t = setTimeout(() => c.abort(), 5000);
       try {
-        const r = await fetch(u, { signal: c.signal, headers: { Accept: "text/plain,*/*" } });
+        const fetchUrl = u.startsWith("http") ? u : "https://" + u;
+        const r = await fetch(fetchUrl, { 
+          signal: c.signal, 
+          headers: { 
+            "Accept": "text/plain,*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          } 
+        });
         if (!r.ok) return;
 
         const rows = (await r.text())
@@ -127,7 +142,7 @@ async function fetchCSV(arr, tls, dls, rmk) {
   return out;
 }
 
-/* ---------- config + upstream cache ---------- */
+/* ---------- config + upstream (移除缓存逻辑) ---------- */
 async function getCfg(env) {
   const k = [
     env.ADD,
@@ -159,50 +174,15 @@ async function getCfg(env) {
   return _C;
 }
 
-async function cacheGetJSON(key) {
-  const cache = caches.default;
-  const req = new Request("https://cache.local/" + key);
-  const hit = await cache.match(req);
-  if (!hit) return null;
-  try {
-    return await hit.json();
-  } catch {
-    return null;
-  }
-}
-
-// 优化 B：引入 ctx 并使用 ctx.waitUntil 实现非阻塞后台缓存写入
-async function cachePutJSON(ctx, key, obj, ttl = 60) {
-  const cache = caches.default;
-  const req = new Request("https://cache.local/" + key);
-  const res = new Response(JSON.stringify(obj), {
-    headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttl}` },
-  });
-  
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil(cache.put(req, res));
-  } else {
-    await cache.put(req, res);
-  }
-}
-
-async function getUpstreamsCached(cfg, ctx) {
-  const key =
-    "up_" +
-    b64(cfg.a1.join("|") + "|" + cfg.a2.join("|") + "|" + String(cfg.dls) + "|" + String(cfg.rmk));
-  const hit = await cacheGetJSON(key);
-  if (hit && Array.isArray(hit.l1) && Array.isArray(hit.l2)) return hit;
-
+// 每次请求直接拉取最新节点
+async function getUpstreamsRealtime(cfg) {
   const [l1, l2] = await Promise.all([fetchAPI(cfg.a1), fetchCSV(cfg.a2, "TRUE", cfg.dls, cfg.rmk)]);
-  const obj = { l1, l2 };
-  await cachePutJSON(ctx, key, obj, 60);
-  return obj;
+  return { l1, l2 };
 }
 
 /* ---------------- HTML (极简) ---------------- */
 function makeHTML(title) {
   const t = esc(title);
-  // 优化 A：剔除 Google Fonts 依赖，改用系统原生字体族，提升渲染速度
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
@@ -318,7 +298,6 @@ function doCopy(){
   });
 }
 
-// 优化 A：多 CDN 轮询 + 延迟按需加载
 function rqr(txt){
   var box=document.getElementById('qr');
   box.innerHTML='';
@@ -350,7 +329,6 @@ function rqr(txt){
   if(typeof QRious !== 'function'){
     box.innerHTML='<div class="qre" style="color:var(--m)">正在加载组件...</div>';
     
-    // CDN 轮询列表
     var cdns = [
       'https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js',
       'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js',
@@ -386,8 +364,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
 /* ---------------- Worker ---------------- */
 export default {
-  // 注入 ctx 上下文用于 ctx.waitUntil
-  async fetch(request, env, ctx) {
+  async fetch(request, env) { // 移除了没用的 ctx
     try {
       const cfg = await getCfg(env);
       const { a0, name, sc, sh, sp, fp } = cfg;
@@ -431,8 +408,8 @@ export default {
 
       if (!host || !uuid) return new Response("missing host/uuid", { status: 400 });
 
-      // 将 ctx 透传给缓存函数
-      const { l1, l2 } = await getUpstreamsCached(cfg, ctx);
+      // 无缓存，纯实时拉取
+      const { l1, l2 } = await getUpstreamsRealtime(cfg);
       const all = Array.from(new Set([...a0, ...l1, ...l2])).filter(Boolean);
 
       const extra = ex.length ? "&" + ex.join("&") : "";
@@ -506,4 +483,3 @@ export default {
     }
   },
 };
-
