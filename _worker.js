@@ -1,644 +1,453 @@
-/**
- * Cloudflare Workers - 优选订阅生成器（修复版 + 美化版）
- *
- * 修复：
- * 1. 全局状态污染 → 所有变量改为 fetch 内局部变量
- * 2. AbortController 共享 bug → 每个请求独立超时
- * 3. /sub 路径判断不严谨 → 改为精确匹配
- * 4. safeBase64 性能 → 改用标准方式
- * 5. env 读取缓存 → 模块级 cache，避免每次重复 parse
- *
- * 功能：
- * 1) 主页 /    ：生成器页面（输入节点链接 -> 生成订阅链接 + 二维码）
- * 2) /sub      ：输出订阅（默认 Base64），支持 clash/singbox/surge 走 subconverter
- *
- * 支持环境变量：
- * - env.ADD       逗号/空格/换行分隔的 IP/域名 列表
- * - env.ADDAPI    逗号分隔的 API URL 列表（每个返回一行一个地址）
- * - env.ADDCSV    逗号分隔的 CSV URL 列表（含 TLS 字段，末列为 speed）
- * - env.DLS       CSV speed 阈值（默认 7）
- * - env.CSVREMARK 备注列偏移（默认 1）：备注列 = TLS列索引 + CSVREMARK
- * - env.SUBAPI    subconverter 地址（可 http(s):// 开头或纯域名）
- * - env.SUBCONFIG subconverter 配置 ini
- * - env.SUBNAME   页面标题/文件名
- * - env.FP        默认指纹（chrome/firefox/safari/edge/ios/android/random），默认 chrome
- * - env.SECRET    （可选）启用加密订阅链接 data=...（AES-GCM）
- */
+const D_SH = "SUBAPI.cmliussss.net";
+const D_SP = "https";
+const D_SC = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
+const D_NAME = "优选订阅生成器";
+const D_FP = "chrome";
+const D_DLS = 7;
+const D_RMK = 1;
 
-// ---- 模块级常量 ----
-const DEFAULT_SUB_CONVERTER = "SUBAPI.cmliussss.net";
-const DEFAULT_SUB_PROTOCOL  = "https";
-const DEFAULT_SUB_CONFIG    =
-  "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
-const DEFAULT_FILENAME      = "优选订阅生成器";
-const DEFAULT_FP            = "chrome";
-const DEFAULT_DLS           = 7;
-const DEFAULT_REMARK_INDEX  = 1;
+const R_ADDR = /^(\[[^\]]+\]|[\w.\-]+):?(\d+)?(?:#(.*))?$/;
 
-// 同时匹配 IPv4、IPv6、域名，格式：addr[:port][#remark]
-const ADDR_REGEX = /^(\[[\s\S]*?\]|[\w\.\-]+):?(\d+)?(?:#(.*))?$/;
+let _C = null;
+let _K = "";
 
-// ---- env 解析缓存（Workers isolate 复用时避免重复 parse）----
-let _envCache = null;
-let _envCacheKey = "";
-
-// ---- 工具函数 ----
-
-function normalizeFP(v) {
-  const val = (v || "").toString().trim().toLowerCase();
-  const allowed = new Set(["chrome","firefox","safari","edge","ios","android","random"]);
-  return allowed.has(val) ? val : DEFAULT_FP;
+function normFP(v) {
+  const s = (v||"").toString().trim().toLowerCase();
+  return new Set(["chrome","firefox","safari","edge","ios","android","random"]).has(s) ? s : D_FP;
 }
 
-async function parseList(content) {
-  if (!content) return [];
-  return content
-    .replace(/[ \t|"'\r\n]+/g, ",")
-    .replace(/,+/g, ",")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+async function parseList(x) {
+  if (!x) return [];
+  return x.replace(/[ \t|"'\r\n]+/g,",").replace(/,+/g,",").split(",").map(s=>s.trim()).filter(Boolean);
 }
 
-function safeBase64(str) {
-  // 标准方式，正确处理 UTF-8
-  return btoa(unescape(encodeURIComponent(str)));
+function b64(s) {
+  const u = new TextEncoder().encode(s);
+  let b = "";
+  for (let i = 0; i < u.length; i++) b += String.fromCharCode(u[i]);
+  return btoa(b);
 }
 
-function b64uEncode(u8) {
-  let bin = "";
-  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+function b64uE(u8) {
+  let b = "";
+  for (let i = 0; i < u8.length; i++) b += String.fromCharCode(u8[i]);
+  return btoa(b).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
 }
 
-function b64uDecode(s) {
-  s = (s || "").replace(/-/g, "+").replace(/_/g, "/");
-  while (s.length % 4) s += "=";
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+function b64uD(s) {
+  s = (s||"").replace(/-/g,"+").replace(/_/g,"/");
+  while (s.length%4) s+="=";
+  const b = atob(s), o = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) o[i] = b.charCodeAt(i);
+  return o;
 }
 
-async function deriveKey(secret) {
-  const raw = new TextEncoder().encode(secret);
-  const hash = await crypto.subtle.digest("SHA-256", raw);
-  return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
+async function dk(sec) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sec));
+  return crypto.subtle.importKey("raw", h, "AES-GCM", false, ["encrypt","decrypt"]);
 }
 
-async function encryptData(secret, obj) {
-  const key = await deriveKey(secret);
-  const iv  = crypto.getRandomValues(new Uint8Array(12));
-  const plain = new TextEncoder().encode(JSON.stringify(obj));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plain);
-  const ctU8 = new Uint8Array(ct);
-  const packed = new Uint8Array(iv.length + ctU8.length);
-  packed.set(iv, 0);
-  packed.set(ctU8, iv.length);
-  return b64uEncode(packed);
+async function enc(sec, obj) {
+  const key = await dk(sec);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, new TextEncoder().encode(JSON.stringify(obj))));
+  const p = new Uint8Array(12+ct.length);
+  p.set(iv); p.set(ct,12);
+  return b64uE(p);
 }
 
-async function decryptData(secret, data) {
-  const packed = b64uDecode(data);
-  if (packed.length < 13) throw new Error("bad data");
-  const iv  = packed.slice(0, 12);
-  const ct  = packed.slice(12);
-  const key = await deriveKey(secret);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+async function dec(sec, data) {
+  const p = b64uD(data);
+  if (p.length < 13) throw new Error("bad");
+  const plain = await crypto.subtle.decrypt({name:"AES-GCM",iv:p.slice(0,12)}, await dk(sec), p.slice(12));
   return JSON.parse(new TextDecoder().decode(new Uint8Array(plain)));
 }
 
-function normalizeSubApi(v) {
-  if (!v) return { host: DEFAULT_SUB_CONVERTER, proto: DEFAULT_SUB_PROTOCOL };
-  if (v.startsWith("http://"))  return { host: v.replace("http://", ""),  proto: "http"  };
-  if (v.startsWith("https://")) return { host: v.replace("https://", ""), proto: "https" };
-  return { host: v, proto: "https" };
+function normSub(v) {
+  if (!v) return {h:D_SH,p:D_SP};
+  if (v.startsWith("http://"))  return {h:v.replace("http://",""),  p:"http"};
+  if (v.startsWith("https://")) return {h:v.replace("https://",""), p:"https"};
+  return {h:v, p:"https"};
 }
 
-function escapeHtml(s) {
-  return (s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function esc(s) {
+  return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-// ---- 数据拉取：修复每个请求独立超时 ----
+async function fto(u, ms) {
+  const c = new AbortController();
+  const t = setTimeout(()=>c.abort(), ms);
+  try { return await fetch(u,{signal:c.signal}); }
+  finally { clearTimeout(t); }
+}
 
-async function fetchAPIList(apiList) {
-  if (!apiList.length) return [];
-  const result = [];
-  await Promise.allSettled(
-    apiList.map(async (u) => {
-      // 每个请求独立超时，避免共享 AbortController 引起的竞争
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2500);
-      try {
-        const r = await fetch(u, { signal: controller.signal });
-        if (!r.ok) return;
-        const text = await r.text();
-        text.split(/\r?\n/).forEach((l) => { const t = l.trim(); if (t) result.push(t); });
-      } catch {
-        // 超时或网络错误，静默跳过
-      } finally {
-        clearTimeout(timer);
+async function fetchAPI(arr) {
+  if (!arr.length) return [];
+  const out = [];
+  await Promise.allSettled(arr.map(async u => {
+    const c = new AbortController();
+    const t = setTimeout(()=>c.abort(), 2500);
+    try {
+      const r = await fetch(u,{signal:c.signal,headers:{Accept:"text/plain,*/*"}});
+      if (!r.ok) return;
+      (await r.text()).split(/\r?\n/).forEach(l=>{const s=l.trim();if(s)out.push(s);});
+    } catch {} finally { clearTimeout(t); }
+  }));
+  return out;
+}
+
+async function fetchCSV(arr, tls, dls, rmk) {
+  if (!arr.length) return [];
+  const out = [];
+  await Promise.allSettled(arr.map(async u => {
+    const c = new AbortController();
+    const t = setTimeout(()=>c.abort(), 3500);
+    try {
+      const r = await fetch(u,{signal:c.signal,headers:{Accept:"text/plain,*/*"}});
+      if (!r.ok) return;
+      const rows = (await r.text()).replace(/\r\n/g,"\n").replace(/\r/g,"\n")
+        .split("\n").filter(x=>x&&x.trim()).map(l=>l.split(",").map(c=>c.trim()));
+      if (!rows.length) return;
+      const hd=rows[0]||[], ds=rows.slice(1);
+      const ti=hd.findIndex(c=>(c||"").toUpperCase()==="TLS");
+      if (ti===-1) return;
+      for (const row of ds) {
+        if (!row||row.length<2) continue;
+        if (((row[ti]||"")+"").toUpperCase()!==(tls+"").toUpperCase()) continue;
+        if (!(parseFloat(row[row.length-1]||"0")>dls)) continue;
+        out.push(row[0]+":"+row[1]+"#"+(row[ti+rmk]||row[0]));
       }
-    })
-  );
-  return result;
+    } catch {} finally { clearTimeout(t); }
+  }));
+  return out;
 }
 
-async function fetchCSVList(addressescsv, tls, DLS, remarkIndex) {
-  if (!addressescsv.length) return [];
-  const result = [];
-
-  function parseCSV(text) {
-    return text
-      .replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-      .split("\n")
-      .filter((x) => x && x.trim())
-      .map((line) => line.split(",").map((c) => c.trim()));
-  }
-
-  await Promise.allSettled(
-    addressescsv.map(async (u) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      try {
-        const r = await fetch(u, { signal: controller.signal });
-        if (!r.ok) return;
-        const text = await r.text();
-        const rows = parseCSV(text);
-        if (!rows.length) return;
-
-        const header   = rows[0] || [];
-        const dataRows = rows.slice(1);
-        const tlsIndex = header.findIndex((c) => (c || "").toUpperCase() === "TLS");
-        if (tlsIndex === -1) return;
-
-        for (const row of dataRows) {
-          if (!row || row.length < 2) continue;
-          const tlsValue = ((row[tlsIndex] || "") + "").toUpperCase();
-          const speed    = parseFloat(row[row.length - 1] || "0");
-          if (tlsValue !== (tls + "").toUpperCase()) continue;
-          if (!(speed > DLS)) continue;
-          const ip     = row[0];
-          const port   = row[1];
-          const remark = row[tlsIndex + remarkIndex] || ip;
-          result.push(ip + ":" + port + "#" + remark);
-        }
-      } catch {
-        // 超时或网络错误，静默跳过
-      } finally {
-        clearTimeout(timer);
-      }
-    })
-  );
-  return result;
-}
-
-// ---- 解析并缓存 env（同一 isolate 内避免重复 parse）----
-
-async function getEnvConfig(env) {
-  const cacheKey = JSON.stringify({
-    ADD: env.ADD, ADDAPI: env.ADDAPI, ADDCSV: env.ADDCSV,
-    SUBAPI: env.SUBAPI, SUBCONFIG: env.SUBCONFIG,
-    SUBNAME: env.SUBNAME, FP: env.FP, DLS: env.DLS,
-    CSVREMARK: env.CSVREMARK, SECRET: env.SECRET,
-  });
-
-  if (_envCacheKey === cacheKey && _envCache) return _envCache;
-
-  const n = normalizeSubApi(env.SUBAPI);
-  _envCache = {
-    addresses:    env.ADD     ? await parseList(env.ADD)     : [],
-    addressesapi: env.ADDAPI  ? await parseList(env.ADDAPI)  : [],
-    addressescsv: env.ADDCSV  ? await parseList(env.ADDCSV)  : [],
-    DLS:          Number(env.DLS)       || DEFAULT_DLS,
-    remarkIndex:  Number(env.CSVREMARK) || DEFAULT_REMARK_INDEX,
-    FileName:     env.SUBNAME   || DEFAULT_FILENAME,
-    subConfig:    env.SUBCONFIG || DEFAULT_SUB_CONFIG,
-    subConverter: n.host,
-    subProtocol:  n.proto,
-    fp:           normalizeFP(env.FP || DEFAULT_FP),
-    SECRET:       (env.SECRET || "").toString(),
+async function getCfg(env) {
+  const k = [env.ADD,env.ADDAPI,env.ADDCSV,env.SUBAPI,env.SUBCONFIG,env.SUBNAME,env.FP,env.DLS,env.CSVREMARK,env.SECRET].join("|");
+  if (_K===k&&_C) return _C;
+  const n = normSub(env.SUBAPI);
+  _C = {
+    a0: env.ADD    ? await parseList(env.ADD)    : [],
+    a1: env.ADDAPI ? await parseList(env.ADDAPI) : [],
+    a2: env.ADDCSV ? await parseList(env.ADDCSV) : [],
+    dls: Number(env.DLS)||D_DLS,
+    rmk: Number(env.CSVREMARK)||D_RMK,
+    name: env.SUBNAME||D_NAME,
+    sc: env.SUBCONFIG||D_SC,
+    sh: n.h, sp: n.p,
+    fp: normFP(env.FP||D_FP),
+    sec: (env.SECRET||"").toString(),
   };
-  _envCacheKey = cacheKey;
-  return _envCache;
+  _K = k;
+  return _C;
 }
 
-// ---- 页面 HTML（深色工业极简风）----
-
-function makeHTML(title, useEncrypt) {
-  const t    = escapeHtml(title);
-  const note = useEncrypt
-    ? "加密模式已启用 — 订阅链接将隐藏 host/uuid 等敏感参数"
-    : "明文模式 — 可设置 env.SECRET 启用加密订阅链接";
-
+function makeHTML(title, encOn) {
+  const t = esc(title);
+  const note = encOn ? "加密模式已启用 — 订阅链接将隐藏 host/uuid 等敏感参数" : "明文模式 — 可设置 env.SECRET 启用加密订阅链接";
   return (
     "<!doctype html><html lang=\"zh-CN\"><head>" +
-    "<meta charset=\"utf-8\">" +
-    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-    "<title>" + t + "</title>" +
+    "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+    "<title>"+t+"</title>" +
     "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">" +
     "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>" +
-    "<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap\" rel=\"stylesheet\">" +
-    "<script src=\"https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js\"></script>" +
+    "<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap\" rel=\"stylesheet\">" +
     "<style>" +
-    ":root{" +
-    "--bg:#0a0a0f;" +
-    "--surface:#13131a;" +
-    "--surface2:#1c1c27;" +
-    "--border:#2a2a38;" +
-    "--accent:#00e5ff;" +
-    "--accent2:#7c3aed;" +
-    "--text:#e8e8f0;" +
-    "--muted:#6b6b80;" +
-    "--success:#00ff9d;" +
-    "--warn:#ffb800;" +
-    "}" +
+    ":root{--bg:#0a0a0f;--s:#13131a;--s2:#1c1c27;--b:#2a2a38;--a:#00e5ff;--a2:#7c3aed;--tx:#e8e8f0;--m:#6b6b80;--ok:#00ff9d;--w:#ffb800}" +
     "*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}" +
-    "html{scroll-behavior:smooth}" +
-    "body{" +
-    "font-family:'JetBrains Mono',monospace;" +
-    "background:var(--bg);" +
-    "color:var(--text);" +
-    "min-height:100vh;" +
-    "display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "padding:24px 16px;" +
-    "}" +
-    /* noise overlay */
-    "body::before{" +
-    "content:'';" +
-    "position:fixed;inset:0;pointer-events:none;z-index:0;" +
-    "background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E\");" +
-    "opacity:0.5;" +
-    "}" +
-    /* grid background lines */
-    "body::after{" +
-    "content:'';" +
-    "position:fixed;inset:0;pointer-events:none;z-index:0;" +
-    "background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);" +
-    "background-size:48px 48px;" +
-    "opacity:0.3;" +
-    "}" +
-    ".wrap{position:relative;z-index:1;width:100%;max-width:640px;}" +
-    /* header */
-    ".header{margin-bottom:40px;}" +
-    ".header-tag{" +
-    "font-family:'JetBrains Mono',monospace;" +
-    "font-size:11px;letter-spacing:0.15em;text-transform:uppercase;" +
-    "color:var(--accent);opacity:0.8;" +
-    "margin-bottom:12px;" +
-    "display:flex;align-items:center;gap:8px;" +
-    "}" +
-    ".header-tag::before{content:'';display:block;width:24px;height:1px;background:var(--accent);}" +
-    ".title{" +
-    "font-family:'Syne',sans-serif;" +
-    "font-size:clamp(26px,5vw,40px);font-weight:800;" +
-    "letter-spacing:-0.02em;line-height:1.1;" +
-    "background:linear-gradient(135deg,var(--text) 0%,var(--accent) 100%);" +
-    "-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;" +
-    "}" +
-    ".subtitle{" +
-    "margin-top:10px;font-size:13px;color:var(--muted);" +
-    "display:flex;align-items:center;gap:6px;" +
-    "}" +
-    ".dot{" +
-    "width:6px;height:6px;border-radius:50%;" +
-    "background:var(--warn);" +
-    "animation:pulse 2s ease-in-out infinite;" +
-    "}" +
-    ".dot.ok{background:var(--success);}" +
-    /* card */
-    ".card{" +
-    "background:var(--surface);" +
-    "border:1px solid var(--border);" +
-    "border-radius:12px;" +
-    "padding:28px 24px;" +
-    "margin-bottom:16px;" +
-    "position:relative;overflow:hidden;" +
-    "transition:border-color .2s;" +
-    "}" +
-    ".card:focus-within{border-color:var(--accent);}" +
-    ".card::before{" +
-    "content:'';position:absolute;top:0;left:0;right:0;height:1px;" +
-    "background:linear-gradient(90deg,transparent,var(--accent),transparent);" +
-    "opacity:0;transition:opacity .3s;" +
-    "}" +
-    ".card:focus-within::before{opacity:0.6;}" +
-    /* label */
-    ".label{" +
-    "font-size:11px;letter-spacing:0.1em;text-transform:uppercase;" +
-    "color:var(--muted);margin-bottom:10px;" +
-    "}" +
-    /* input */
-    ".input-wrap{position:relative;}" +
-    "textarea,input[type=text]{" +
-    "width:100%;background:var(--surface2);" +
-    "border:1px solid var(--border);border-radius:8px;" +
-    "padding:12px 14px;color:var(--text);" +
-    "font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;" +
-    "resize:vertical;outline:none;" +
-    "transition:border-color .2s,box-shadow .2s;" +
-    "}" +
-    "textarea{min-height:100px;}" +
-    "textarea:focus,input[type=text]:focus{" +
-    "border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,0.12);" +
-    "}" +
-    "textarea::placeholder,input[type=text]::placeholder{color:var(--muted);opacity:0.6;}" +
-    /* button */
-    ".btn{" +
-    "width:100%;padding:14px 20px;border-radius:8px;" +
-    "border:none;cursor:pointer;" +
-    "font-family:'Syne',sans-serif;font-size:15px;font-weight:700;" +
-    "letter-spacing:0.04em;text-transform:uppercase;" +
-    "background:linear-gradient(135deg,var(--accent2),var(--accent));" +
-    "color:#000;transition:transform .15s,box-shadow .15s,filter .15s;" +
-    "position:relative;overflow:hidden;" +
-    "}" +
-    ".btn::after{" +
-    "content:'';position:absolute;inset:0;" +
-    "background:linear-gradient(135deg,transparent 40%,rgba(255,255,255,0.15));" +
-    "}" +
-    ".btn:hover{transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,229,255,0.25);filter:brightness(1.05);}" +
-    ".btn:active{transform:translateY(0);}" +
-    ".btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}" +
-    /* result */
-    ".result-wrap{display:none;}" +
-    ".result-wrap.show{display:block;animation:fadeUp .3s ease;}" +
-    ".result-row{display:flex;gap:8px;align-items:stretch;}" +
-    ".result-input{flex:1;cursor:pointer;}" +
-    ".copy-btn{" +
-    "padding:12px 16px;border-radius:8px;border:1px solid var(--border);" +
-    "background:var(--surface2);color:var(--text);cursor:pointer;" +
-    "font-family:'JetBrains Mono',monospace;font-size:12px;" +
-    "transition:all .2s;white-space:nowrap;" +
-    "}" +
-    ".copy-btn:hover{border-color:var(--accent);color:var(--accent);}" +
-    ".copy-btn.copied{border-color:var(--success);color:var(--success);}" +
-    /* formats */
-    ".formats{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}" +
-    ".fmt-btn{" +
-    "padding:6px 12px;border-radius:6px;" +
-    "border:1px solid var(--border);background:transparent;" +
-    "color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;" +
-    "cursor:pointer;transition:all .2s;letter-spacing:0.05em;" +
-    "}" +
-    ".fmt-btn:hover{border-color:var(--accent2);color:var(--accent2);}" +
-    /* qrcode */
-    "#qrcode{margin-top:20px;display:flex;justify-content:center;}" +
-    "#qrcode canvas,#qrcode img{border-radius:8px;border:2px solid var(--border);}" +
-    /* error */
-    ".error{" +
-    "background:rgba(255,80,80,0.08);border:1px solid rgba(255,80,80,0.3);" +
-    "border-radius:8px;padding:12px 14px;" +
-    "color:#ff6b6b;font-size:13px;margin-top:8px;display:none;" +
-    "}" +
-    ".error.show{display:block;}" +
-    /* footer */
-    ".footer{margin-top:28px;font-size:11px;color:var(--muted);text-align:center;opacity:0.5;}" +
-    /* animations */
+    "body{font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}" +
+    "body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E\");opacity:.5}" +
+    "body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(var(--b) 1px,transparent 1px),linear-gradient(90deg,var(--b) 1px,transparent 1px);background-size:48px 48px;opacity:.3}" +
+    ".wrap{position:relative;z-index:1;width:100%;max-width:640px}" +
+    ".hd{margin-bottom:36px}" +
+    ".tag{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--a);opacity:.8;margin-bottom:10px;display:flex;align-items:center;gap:8px}" +
+    ".tag::before{content:'';display:block;width:22px;height:1px;background:var(--a)}" +
+    ".tt{font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}" +
+    ".sub{margin-top:8px;font-size:13px;color:var(--m);display:flex;align-items:center;gap:6px}" +
+    ".dot{width:6px;height:6px;border-radius:50%;background:var(--w);animation:pulse 2s ease-in-out infinite}" +
+    ".dot.ok{background:var(--ok)}" +
+    ".card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:22px 20px;margin-bottom:12px;position:relative;overflow:hidden;transition:border-color .2s}" +
+    ".card:focus-within{border-color:var(--a)}" +
+    ".card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--a),transparent);opacity:0;transition:opacity .3s}" +
+    ".card:focus-within::before{opacity:.6}" +
+    ".lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--m);margin-bottom:10px}" +
+    "textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;resize:vertical;outline:none;transition:border-color .2s,box-shadow .2s}" +
+    "textarea{min-height:96px}" +
+    "textarea:focus,input[type=text]:focus{border-color:var(--a);box-shadow:0 0 0 2px rgba(0,229,255,.12)}" +
+    "textarea::placeholder,input[type=text]::placeholder{color:var(--m);opacity:.6}" +
+    ".btn{width:100%;padding:14px 20px;border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(135deg,var(--a2),var(--a));color:#000;transition:transform .15s,box-shadow .15s,filter .15s;position:relative;overflow:hidden}" +
+    ".btn::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 40%,rgba(255,255,255,.15))}" +
+    ".btn:hover{transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,229,255,.25);filter:brightness(1.05)}" +
+    ".btn:active{transform:translateY(0)}" +
+    ".rrow{display:flex;gap:8px;align-items:stretch}" +
+    ".ri{flex:1;cursor:pointer}" +
+    ".cp{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;transition:all .2s;white-space:nowrap}" +
+    ".cp:hover{border-color:var(--a);color:var(--a)}" +
+    ".cp.ok{border-color:var(--ok);color:var(--ok)}" +
+    ".fg{margin-top:14px}" +
+    ".fl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m);margin-bottom:7px;opacity:.6}" +
+    ".fs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}" +
+    ".f{padding:5px 11px;border-radius:6px;border:1px solid var(--b);background:transparent;color:var(--m);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;transition:all .2s;letter-spacing:.05em}" +
+    ".f:hover{border-color:var(--a2);color:var(--a2)}" +
+    ".f.on{border-color:var(--a);color:var(--a);background:rgba(0,229,255,.08)}" +
+    "#qr{margin-top:16px;display:flex;justify-content:center}" +
+    "#qr canvas{border-radius:10px;border:1px solid var(--b)}" +
+    ".err{display:none;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.3);background:rgba(255,80,80,.08);color:#ff6b6b;font-size:13px}" +
+    ".err.on{display:block}" +
+    ".ft{margin-top:24px;font-size:11px;color:var(--m);text-align:center;opacity:.4}" +
+    ".rw{display:none;margin-top:12px}" +
+    ".rw.on{display:block;animation:fadeUp .3s ease}" +
     "@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}" +
-    "@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}" +
-    "@media(max-width:480px){.card{padding:20px 16px}}" +
+    "@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}" +
+    "@media(max-width:480px){.card{padding:16px 14px}}" +
     "</style></head><body>" +
-
     "<div class=\"wrap\">" +
-
-    /* header */
-    "<div class=\"header\">" +
-    "<div class=\"header-tag\">Subscription Generator</div>" +
-    "<h1 class=\"title\">" + t + "</h1>" +
-    "<div class=\"subtitle\">" +
-    "<span class=\"dot" + (useEncrypt ? " ok" : "") + "\"></span>" +
-    escapeHtml(note) +
+    "<div class=\"hd\">" +
+    "<div class=\"tag\">Subscription Generator</div>" +
+    "<h1 class=\"tt\">"+t+"</h1>" +
+    "<div class=\"sub\"><span class=\"dot"+(encOn?" ok":"")+"\" ></span>"+esc(note)+"</div>" +
     "</div>" +
-    "</div>" +
-
-    /* input card */
     "<div class=\"card\">" +
-    "<div class=\"label\">节点链接</div>" +
-    "<textarea id=\"link\" placeholder=\"粘贴 vmess:// / vless:// / trojan:// 链接...\"></textarea>" +
-    "<div class=\"error\" id=\"err\"></div>" +
+    "<div class=\"lab\">节点链接</div>" +
+    "<textarea id=\"lk\" placeholder=\"粘贴 vmess:// / vless:// / trojan:// 链接...\"></textarea>" +
+    "<div class=\"err\" id=\"er\"></div>" +
     "</div>" +
-
-    /* button */
-    "<button class=\"btn\" onclick=\"generate()\" id=\"genBtn\">⚡ 生成订阅链接</button>" +
-
-    /* result card */
-    "<div class=\"result-wrap\" id=\"resultWrap\">" +
-    "<div class=\"card\" style=\"margin-top:16px\">" +
-    "<div class=\"label\">订阅链接</div>" +
-    "<div class=\"result-row\">" +
-    "<input type=\"text\" class=\"result-input\" id=\"result\" readonly onclick=\"copyLink()\" placeholder=\"生成的订阅链接...\">" +
-    "<button class=\"copy-btn\" id=\"copyBtn\" onclick=\"copyLink()\">复制</button>" +
+    "<button class=\"btn\" onclick=\"gen()\">⚡ 生成订阅链接</button>" +
+    "<div class=\"rw\" id=\"rw\">" +
+    "<div class=\"card\">" +
+    "<div class=\"lab\">订阅链接</div>" +
+    "<div class=\"rrow\">" +
+    "<input type=\"text\" class=\"ri\" id=\"ou\" readonly onclick=\"cp()\">" +
+    "<button class=\"cp\" id=\"cb\" onclick=\"cp()\">复制</button>" +
     "</div>" +
-    "<div class=\"formats\">" +
-    "<button class=\"fmt-btn\" onclick=\"openFmt('clash')\">Clash</button>" +
-    "<button class=\"fmt-btn\" onclick=\"openFmt('singbox')\">SingBox</button>" +
-    "<button class=\"fmt-btn\" onclick=\"openFmt('surge')\">Surge</button>" +
-    "<button class=\"fmt-btn\" onclick=\"openFmt('')\">Base64</button>" +
+    "<div class=\"fg\">" +
+    "<div class=\"fl\">常用</div>" +
+    "<div class=\"fs\">" +
+    "<button class=\"f on\" onclick=\"sw(this,'')\">Base64</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'clash')\">Clash</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'clashr')\">ClashR</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'singbox')\">Sing-Box</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'v2ray')\">V2Ray</button>" +
     "</div>" +
-    "<div id=\"qrcode\"></div>" +
+    "<div class=\"fl\">Surge</div>" +
+    "<div class=\"fs\">" +
+    "<button class=\"f\" onclick=\"sw(this,'surge&ver=2')\">Surge 2</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'surge&ver=3')\">Surge 3</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'surge&ver=4')\">Surge 4</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'surge&ver=5')\">Surge 5</button>" +
+    "</div>" +
+    "<div class=\"fl\">其他</div>" +
+    "<div class=\"fs\">" +
+    "<button class=\"f\" onclick=\"sw(this,'quan')\">Quantumult</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'quanx')\">Quantumult X</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'loon')\">Loon</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'surfboard')\">Surfboard</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'ss')\">SS (SIP002)</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'sssub')\">SS Android</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'ssr')\">SSR</button>" +
+    "<button class=\"f\" onclick=\"sw(this,'ssd')\">SSD</button>" +
     "</div>" +
     "</div>" +
-
-    /* footer */
-    "<div class=\"footer\">Powered by Cloudflare Workers</div>" +
-
+    "<div id=\"qr\"></div>" +
     "</div>" +
-
+    "</div>" +
+    "<div class=\"ft\">Powered by Cloudflare Workers</div>" +
+    "</div>" +
     "<script>" +
-    "var baseUrl='';" +
-
-    "function showErr(msg){var e=document.getElementById('err');e.textContent=msg;e.classList.add('show');}" +
-    "function hideErr(){document.getElementById('err').classList.remove('show');}" +
-
-    "function generate(){" +
-    "  hideErr();" +
-    "  var link=document.getElementById('link').value.trim();" +
-    "  if(!link){showErr('请输入节点链接');return;}" +
-    "  var domain=location.origin;" +
-    "  var fp='chrome';" +
-    "  try{" +
-    "    if(link.indexOf('vmess://')===0){" +
-    "      var j=JSON.parse(atob(link.slice(8)));" +
-    "      baseUrl=domain+'/sub?host='+encodeURIComponent(j.host||j.add||'')+" +
-    "        '&uuid='+encodeURIComponent(j.id||'')+" +
-    "        '&path='+encodeURIComponent(j.path||'/')+" +
-    "        '&sni='+encodeURIComponent(j.sni||j.host||j.add||'')+" +
-    "        '&type='+encodeURIComponent(j.net||'ws')+" +
-    "        '&fp='+encodeURIComponent(fp);" +
-    "    }else if(link.indexOf('vless://')===0||link.indexOf('trojan://')===0){" +
-    "      var uuid=link.split('//')[1].split('@')[0];" +
-    "      var atPart=link.split('@')[1]||'';" +
-    "      var qIdx=atPart.indexOf('?');var hIdx=atPart.indexOf('#');" +
-    "      var search=qIdx>=0?atPart.slice(qIdx+1).split('#')[0]:'';" +
-    "      baseUrl=domain+'/sub?uuid='+encodeURIComponent(uuid)+(search?'&'+search:'')+'&fp='+encodeURIComponent(fp);" +
-    "    }else{" +
-    "      showErr('仅支持 vmess:// / vless:// / trojan:// 格式');return;" +
-    "    }" +
-    "    setResult(baseUrl);" +
-    "  }catch(e){showErr('解析失败：链接格式有误');}" +
+    "var u0='';" +
+    "function se(m){var e=document.getElementById('er');e.textContent=m;e.className='err on';}" +
+    "function he(){document.getElementById('er').className='err';}" +
+    "function gen(){" +
+    "he();" +
+    "var l=document.getElementById('lk').value.trim();" +
+    "if(!l){se('请输入节点链接');return;}" +
+    "try{" +
+    "if(l.indexOf('vmess://')===0){" +
+    "var j=JSON.parse(atob(l.slice(8)));" +
+    "u0=location.origin+'/sub?host='+encodeURIComponent(j.host||j.add||'')+'&uuid='+encodeURIComponent(j.id||'')+'&path='+encodeURIComponent(j.path||'/')+'&sni='+encodeURIComponent(j.sni||j.host||j.add||'')+'&type='+encodeURIComponent(j.net||'ws')+'&fp=chrome';" +
+    "}else if(l.indexOf('vless://')===0||l.indexOf('trojan://')===0){" +
+    "var uu=l.split('//')[1].split('@')[0];" +
+    "var ap=l.split('@')[1]||'';" +
+    "var qi=ap.indexOf('?');" +
+    "var s=qi>=0?ap.slice(qi+1).split('#')[0]:'';" +
+    "u0=location.origin+'/sub?uuid='+encodeURIComponent(uu)+(s?'&'+s:'');" +
+    "}else{se('仅支持 vmess:// / vless:// / trojan://');return;}" +
+    "show(bld(''));" +
+    "}catch(e){se('解析失败：链接格式有误');}" +
     "}" +
-
-    "function setResult(url){" +
-    "  document.getElementById('result').value=url;" +
-    "  document.getElementById('resultWrap').classList.add('show');" +
-    "  var qr=document.getElementById('qrcode');qr.innerHTML='';" +
-    "  new QRCode(qr,{text:url,width:180,height:180,colorDark:'#00e5ff',colorLight:'#13131a'});" +
-    "  document.getElementById('result').scrollIntoView({behavior:'smooth',block:'nearest'});" +
+    "function bld(f){" +
+    "if(!u0)return '';" +
+    "if(!f)return u0;" +
+    "var sep=u0.indexOf('?')>=0?'&':'?';" +
+    "if(f.indexOf('&')>=0){var p=f.split('&');return u0+sep+'format='+p[0]+'&'+p.slice(1).join('&');}" +
+    "return u0+sep+'format='+f;" +
     "}" +
-
-    "function openFmt(fmt){" +
-    "  if(!baseUrl){return;}" +
-    "  var url=fmt?baseUrl+(baseUrl.indexOf('?')>=0?'&':'?')+'format='+fmt:baseUrl;" +
-    "  window.open(url,'_blank');" +
+    "function show(x){" +
+    "var rw=document.getElementById('rw');rw.className='rw on';" +
+    "document.getElementById('ou').value=x;" +
+    "rqr(x);" +
+    "rw.scrollIntoView({behavior:'smooth',block:'nearest'});" +
     "}" +
-
-    "function copyLink(){" +
-    "  var v=document.getElementById('result').value;" +
-    "  if(!v)return;" +
-    "  navigator.clipboard.writeText(v).then(function(){" +
-    "    var btn=document.getElementById('copyBtn');" +
-    "    btn.textContent='已复制 ✓';btn.classList.add('copied');" +
-    "    setTimeout(function(){btn.textContent='复制';btn.classList.remove('copied');},2000);" +
-    "  });" +
+    "function sw(b,f){" +
+    "if(!u0)return;" +
+    "document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});" +
+    "b.classList.add('on');" +
+    "var x=bld(f);" +
+    "document.getElementById('ou').value=x;" +
+    "rqr(x);" +
     "}" +
+    "function cp(){" +
+    "var v=document.getElementById('ou').value;if(!v)return;" +
+    "navigator.clipboard.writeText(v).then(function(){" +
+    "var b=document.getElementById('cb');b.textContent='已复制 ✓';b.classList.add('ok');" +
+    "setTimeout(function(){b.textContent='复制';b.classList.remove('ok');},1800);" +
+    "});" +
+    "}" +
+    "function rqr(txt){" +
+    "var box=document.getElementById('qr');box.innerHTML='';" +
+    "if(!txt)return;" +
+    "try{" +
+    "var qr=QRCode(0,'M');qr.addData(txt);qr.make();" +
+    "var n=qr.getModuleCount(),sc=4,mg=10,sz=n*sc+mg*2;" +
+    "var c=document.createElement('canvas');c.width=sz;c.height=sz;box.appendChild(c);" +
+    "var ctx=c.getContext('2d');" +
+    "ctx.fillStyle='#13131a';ctx.fillRect(0,0,sz,sz);" +
+    "ctx.fillStyle='#00e5ff';" +
+    "for(var r=0;r<n;r++)for(var col=0;col<n;col++)if(qr.isDark(r,col))ctx.fillRect(mg+col*sc,mg+r*sc,sc,sc);" +
+    "}catch(e){}" +
+    "}" +
+    "(function(g){" +
+    "function QR8bitByte(d){this.mode=1;this.data=d;}" +
+    "QR8bitByte.prototype={getLength:function(){return this.data.length;},write:function(b){for(var i=0;i<this.data.length;i++)b.put(this.data.charCodeAt(i),8);}};" +
+    "function QRBitBuffer(){this.buffer=[];this.length=0;}" +
+    "QRBitBuffer.prototype={get:function(i){return((this.buffer[Math.floor(i/8)]>>>(7-i%8))&1)==1;},put:function(n,l){for(var i=0;i<l;i++)this.putBit(((n>>>(l-i-1))&1)==1);},putBit:function(b){var i=Math.floor(this.length/8);if(this.buffer.length<=i)this.buffer.push(0);if(b)this.buffer[i]|=(0x80>>>(this.length%8));this.length++;}};" +
+    "function QRPolynomial(n,s){var o=0;while(o<n.length&&n[o]==0)o++;this.num=new Array(n.length-o+s);for(var i=0;i<n.length-o;i++)this.num[i]=n[i+o];}" +
+    "QRPolynomial.prototype={get:function(i){return this.num[i];},getLength:function(){return this.num.length;},multiply:function(e){var n=new Array(this.getLength()+e.getLength()-1);for(var i=0;i<n.length;i++)n[i]=0;for(var i=0;i<this.getLength();i++)for(var j=0;j<e.getLength();j++)n[i+j]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(e.get(j)));return new QRPolynomial(n,0);},mod:function(e){if(this.getLength()-e.getLength()<0)return this;var r=QRMath.glog(this.get(0))-QRMath.glog(e.get(0));var n=new Array(this.getLength());for(var i=0;i<this.getLength();i++)n[i]=this.get(i);for(var i=0;i<e.getLength();i++)n[i]^=QRMath.gexp(QRMath.glog(e.get(i))+r);return new QRPolynomial(n,0).mod(e);}};" +
+    "var QRMath={glog:function(n){if(n<1)throw new Error('glog');return QRMath.LOG_TABLE[n];},gexp:function(n){while(n<0)n+=255;while(n>=256)n-=255;return QRMath.EXP_TABLE[n];},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};" +
+    "for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;" +
+    "for(var i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];" +
+    "for(var i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;" +
+    "function QRRSBlock(t,d){this.totalCount=t;this.dataCount=d;}" +
+    "QRRSBlock.getRSBlocks=function(tn,ec){var T={'1-L':[[1,26,19]],'1-M':[[1,26,16]],'2-L':[[1,44,34]],'2-M':[[1,44,28]],'3-L':[[1,70,55]],'3-M':[[1,70,44]],'4-L':[[1,100,80]],'4-M':[[2,50,32]]};var t=T[tn+'-'+ec];if(!t)throw new Error('RS');var l=[];for(var i=0;i<t.length;i++){var c=t[i][0],to=t[i][1],da=t[i][2];for(var j=0;j<c;j++)l.push(new QRRSBlock(to,da));}return l;};" +
+    "function QRCodeModel(tn,ec){this.typeNumber=tn;this.errorCorrectLevel=ec;this.modules=null;this.moduleCount=0;this.dataCache=null;this.dataList=[];}" +
+    "QRCodeModel.prototype={addData:function(d){this.dataList.push(new QR8bitByte(d));this.dataCache=null;},isDark:function(r,c){return this.modules[r][c]===true;},getModuleCount:function(){return this.moduleCount;}," +
+    "make:function(){if(this.typeNumber<1){for(var t=1;t<=4;t++){try{this.typeNumber=t;this.dataCache=null;this._mi(false,0);return;}catch(e){}}throw new Error('too long');}this._mi(false,0);}," +
+    "_mi:function(test,mp){this.moduleCount=this.typeNumber*4+17;this.modules=[];for(var r=0;r<this.moduleCount;r++){this.modules[r]=[];for(var c=0;c<this.moduleCount;c++)this.modules[r][c]=null;}this._pp(0,0);this._pp(this.moduleCount-7,0);this._pp(0,this.moduleCount-7);this._tp();this._ti(test,mp);if(!this.dataCache)this.dataCache=QRCodeModel.createData(this.typeNumber,this.errorCorrectLevel,this.dataList);this._md(this.dataCache,mp);}," +
+    "_pp:function(row,col){for(var r=-1;r<=7;r++){if(row+r<=-1||this.moduleCount<=row+r)continue;for(var c=-1;c<=7;c++){if(col+c<=-1||this.moduleCount<=col+c)continue;if((0<=r&&r<=6&&(c==0||c==6))||(0<=c&&c<=6&&(r==0||r==6))||(2<=r&&r<=4&&2<=c&&c<=4))this.modules[row+r][col+c]=true;else this.modules[row+r][col+c]=false;}}}," +
+    "_tp:function(){for(var i=8;i<this.moduleCount-8;i++){if(this.modules[i][6]==null)this.modules[i][6]=(i%2==0);if(this.modules[6][i]==null)this.modules[6][i]=(i%2==0);}}," +
+    "_ti:function(test,mp){var ec=(this.errorCorrectLevel==='L')?1:0;var d=(ec<<3)|mp;var bits=QRCodeModel.getBCHTypeInfo(d);for(var i=0;i<15;i++){var m=(!test&&((bits>>i)&1)==1);if(i<6)this.modules[i][8]=m;else if(i<8)this.modules[i+1][8]=m;else this.modules[this.moduleCount-15+i][8]=m;}for(var i=0;i<15;i++){var m=(!test&&((bits>>i)&1)==1);if(i<8)this.modules[8][this.moduleCount-i-1]=m;else if(i<9)this.modules[8][15-i-1+1]=m;else this.modules[8][15-i-1]=m;}this.modules[this.moduleCount-8][8]=(!test);}," +
+    "_md:function(data,mp){var inc=-1,row=this.moduleCount-1,bi=7,by=0;for(var col=this.moduleCount-1;col>0;col-=2){if(col==6)col--;while(true){for(var c=0;c<2;c++){if(this.modules[row][col-c]==null){var dark=false;if(by<data.length)dark=(((data[by]>>>bi)&1)==1);if(QRCodeModel.getMask(mp,row,col-c))dark=!dark;this.modules[row][col-c]=dark;bi--;if(bi==-1){by++;bi=7;}}}row+=inc;if(row<0||this.moduleCount<=row){row-=inc;inc=-inc;break;}}}}}" +
+    "QRCodeModel.PAD0=0xEC;QRCodeModel.PAD1=0x11;" +
+    "QRCodeModel.getBCHTypeInfo=function(d){var x=d<<10;while(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)>=0)x^=(0x537<<(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)));return((d<<10)|x)^0x5412;};" +
+    "QRCodeModel.getBCHDigit=function(d){var n=0;while(d!=0){n++;d>>>=1;}return n;};" +
+    "QRCodeModel.getMask=function(mp,i,j){return(i+j)%2==0;};" +
+    "QRCodeModel.getErrorCorrectPolynomial=function(ec){var a=new QRPolynomial([1],0);for(var i=0;i<ec;i++)a=a.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return a;};" +
+    "QRCodeModel.createData=function(tn,ec,dl){var rs=QRRSBlock.getRSBlocks(tn,ec);var buf=new QRBitBuffer();for(var i=0;i<dl.length;i++){var d=dl[i];buf.put(4,4);buf.put(d.getLength(),(tn<10)?8:16);d.write(buf);}var tot=0;for(var i=0;i<rs.length;i++)tot+=rs[i].dataCount;if(buf.length>tot*8)throw new Error('overflow');if(buf.length+4<=tot*8)buf.put(0,4);while(buf.length%8!=0)buf.putBit(false);while(true){if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD0,8);if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD1,8);}return QRCodeModel.createBytes(buf,rs);};" +
+    "QRCodeModel.createBytes=function(buf,rs){var off=0,mDc=0,mEc=0,dc=[],ec=[];for(var r=0;r<rs.length;r++){var dcc=rs[r].dataCount,ecc=rs[r].totalCount-dcc;mDc=Math.max(mDc,dcc);mEc=Math.max(mEc,ecc);dc[r]=new Array(dcc);for(var i=0;i<dc[r].length;i++)dc[r][i]=0xff&buf.buffer[i+off];off+=dcc;var rp=QRCodeModel.getErrorCorrectPolynomial(ecc);var rw=new QRPolynomial(dc[r],rp.getLength()-1);var mp2=rw.mod(rp);ec[r]=new Array(rp.getLength()-1);for(var i=0;i<ec[r].length;i++){var mi=i+mp2.getLength()-ec[r].length;ec[r][i]=(mi>=0)?mp2.get(mi):0;}}var tot=0;for(var i=0;i<rs.length;i++)tot+=rs[i].totalCount;var data=new Array(tot),idx=0;for(var i=0;i<mDc;i++)for(var r=0;r<rs.length;r++)if(i<dc[r].length)data[idx++]=dc[r][i];for(var i=0;i<mEc;i++)for(var r=0;r<rs.length;r++)if(i<ec[r].length)data[idx++]=ec[r][i];return data;};" +
+    "g.QRCode=function(t,l){return new QRCodeModel(t,l||'M');};" +
+    "})(this);" +
     "</script>" +
-
-    "</body></html>"
+    "</div></body></html>"
   );
 }
-
-// ---- 主处理函数 ----
 
 export default {
   async fetch(request, env) {
+    try {
+      const cfg = await getCfg(env);
+      const {a0,a1,a2,dls,rmk,name,sc,sh,sp,fp,sec} = cfg;
 
-    // 读取（并缓存）env 配置
-    const cfg = await getEnvConfig(env);
-    const {
-      addresses, addressesapi, addressescsv,
-      DLS, remarkIndex, FileName, subConfig,
-      subConverter, subProtocol, fp, SECRET,
-    } = cfg;
+      const url = new URL(request.url);
+      const ua  = ((request.headers.get("User-Agent")||"")+"").toLowerCase();
+      const fmt = ((url.searchParams.get("format")||"")+"").toLowerCase();
 
-    const url    = new URL(request.url);
-    const ua     = ((request.headers.get("User-Agent") || "") + "").toLowerCase();
-    const format = ((url.searchParams.get("format") || "") + "").toLowerCase();
-
-    // ---- 主页（精确匹配，避免 /subscribe 等误触）----
-    if (url.pathname !== "/sub") {
-      const html = makeHTML(FileName, !!SECRET);
-      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
-    }
-
-    // ---- /sub 参数解析 ----
-    // 已知参数白名单（这些参数单独处理，不放入 extraParams）
-    const KNOWN_PARAMS = new Set([
-      "data","host","uuid","password","path","sni","type","fp","alpn","security","encryption","format"
-    ]);
-
-    let host = "", uuid = "", path = "/", sni = "", type = "ws";
-    let qfp  = normalizeFP(url.searchParams.get("fp") || fp);
-    let alpn = url.searchParams.get("alpn") || "";
-
-    // 收集所有未知参数（mode/insecure/allowInsecure 等），原样透传到生成的节点链接
-    // 同时对同名参数去重，只取第一个
-    const extraParams = [];
-    const seenParams  = new Set(KNOWN_PARAMS);
-    for (const [k, v] of url.searchParams.entries()) {
-      if (seenParams.has(k)) continue;
-      seenParams.add(k);
-      extraParams.push(encodeURIComponent(k) + "=" + encodeURIComponent(v));
-    }
-
-    const data = url.searchParams.get("data");
-    if (data) {
-      if (!SECRET) {
-        return new Response("data 模式需要设置 env.SECRET", { status: 400 });
+      if (url.pathname !== "/sub") {
+        return new Response(makeHTML(name, !!sec), {
+          headers: {"content-type":"text/html; charset=utf-8"},
+        });
       }
-      try {
-        const obj = await decryptData(SECRET, data);
-        host = obj.host || "";
-        uuid = obj.uuid || "";
-        path = obj.path || "/";
-        sni  = obj.sni  || host;
-        type = obj.type || "ws";
-        alpn = obj.alpn || alpn;
-        qfp  = normalizeFP(obj.fp || qfp);
-      } catch {
-        return new Response("data 解密失败", { status: 400 });
+
+      const KP = new Set(["data","host","uuid","password","path","sni","type","fp","alpn","security","encryption","format"]);
+      let host="", uuid="", path="/", sni="", type="ws";
+      let qfp = normFP(url.searchParams.get("fp")||fp);
+      let alpn = url.searchParams.get("alpn")||"";
+
+      const ex = [];
+      const seen = new Set(KP);
+      for (const [k,v] of url.searchParams.entries()) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        ex.push(encodeURIComponent(k)+"="+encodeURIComponent(v));
       }
-    } else {
-      host = url.searchParams.get("host") || "";
-      uuid = url.searchParams.get("uuid") || url.searchParams.get("password") || "";
-      path = url.searchParams.get("path") || "/";
-      sni  = url.searchParams.get("sni")  || host;
-      type = url.searchParams.get("type") || "ws";
-    }
 
-    if (!host || !uuid) {
-      return new Response("缺少 host 或 uuid", { status: 400 });
-    }
-
-    // ---- 聚合地址列表 ----
-    const [apiList, csvList] = await Promise.all([
-      fetchAPIList(addressesapi),
-      fetchCSVList(addressescsv, "TRUE", DLS, remarkIndex),
-    ]);
-    const all = Array.from(new Set([...addresses, ...apiList, ...csvList])).filter(Boolean);
-
-    // ---- 构建 VLESS 节点链接 ----
-    const extra = extraParams.length ? "&" + extraParams.join("&") : "";
-    const content = all.map((addr) => {
-      let address = addr, port = "443", remark = addr;
-      const m = addr.match(ADDR_REGEX);
-      if (m) {
-        address = m[1];
-        port    = m[2] || port;
-        remark  = m[3] || address;
+      const data = url.searchParams.get("data");
+      if (data) {
+        if (!sec) return new Response("data 模式需要设置 SECRET", {status:400});
+        try {
+          const o = await dec(sec,data);
+          host=o.host||""; uuid=o.uuid||""; path=o.path||"/";
+          sni=o.sni||host; type=o.type||"ws"; alpn=o.alpn||alpn;
+          qfp=normFP(o.fp||qfp);
+        } catch {
+          return new Response("data 解密失败", {status:400});
+        }
+      } else {
+        host = url.searchParams.get("host")||"";
+        uuid = url.searchParams.get("uuid")||url.searchParams.get("password")||"";
+        path = url.searchParams.get("path")||"/";
+        sni  = url.searchParams.get("sni")||host;
+        type = url.searchParams.get("type")||"ws";
       }
-      return (
-        "vless://" + uuid + "@" + address + ":" + port +
-        "?security=tls" +
-        "&sni="        + encodeURIComponent(sni)  +
-        "&alpn="       + encodeURIComponent(alpn) +
-        "&fp="         + encodeURIComponent(qfp)  +
-        "&type="       + encodeURIComponent(type) +
-        "&host="       + encodeURIComponent(host) +
-        "&path="       + encodeURIComponent(path) +
-        "&encryption=none" +
-        extra +                                      // mode/insecure/allowInsecure 等透传参数
-        "#"            + encodeURIComponent(remark)
-      );
-    }).join("\n");
 
-    // ---- subconverter 输出 ----
-    const makeConvUrl = (target) =>
-      subProtocol + "://" + subConverter +
-      "/sub?target=" + target +
-      "&url="    + encodeURIComponent(url.href) +
-      "&config=" + encodeURIComponent(subConfig);
+      if (!host||!uuid) return new Response("missing host/uuid", {status:400});
 
-    if (ua.includes("clash")   || format === "clash")   {
-      const r = await fetch(makeConvUrl("clash"));
-      return new Response(await r.text(), { headers: { "content-type": "text/plain; charset=utf-8" } });
-    }
-    if (ua.includes("singbox") || format === "singbox") {
-      const r = await fetch(makeConvUrl("singbox"));
-      return new Response(await r.text(), { headers: { "content-type": "text/plain; charset=utf-8" } });
-    }
-    if (ua.includes("surge")   || format === "surge")   {
-      const r = await fetch(makeConvUrl("surge"));
-      return new Response(await r.text(), { headers: { "content-type": "text/plain; charset=utf-8" } });
-    }
+      const [l1,l2] = await Promise.all([fetchAPI(a1), fetchCSV(a2,"TRUE",dls,rmk)]);
+      const all = Array.from(new Set([...a0,...l1,...l2])).filter(Boolean);
+      const extra = ex.length ? "&"+ex.join("&") : "";
 
-    // ---- 默认：Base64 ----
-    return new Response(safeBase64(content), {
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    });
+      const body = all.map(addr => {
+        let ad=addr, pt="443", rk=addr;
+        const m = addr.match(R_ADDR);
+        if (m) { ad=m[1]; pt=m[2]||pt; rk=m[3]||ad; }
+        return "vless://"+uuid+"@"+ad+":"+pt+
+          "?security=tls"+
+          "&sni="+encodeURIComponent(sni)+
+          "&alpn="+encodeURIComponent(alpn)+
+          "&fp="+encodeURIComponent(qfp)+
+          "&type="+encodeURIComponent(type)+
+          "&host="+encodeURIComponent(host)+
+          "&path="+encodeURIComponent(path)+
+          "&encryption=none"+extra+
+          "#"+encodeURIComponent(rk);
+      }).join("\n");
+
+      const convUrl = t =>
+        sp+"://"+sh+"/sub?target="+t+
+        "&url="+encodeURIComponent(url.href)+
+        "&config="+encodeURIComponent(sc);
+
+      let target = null;
+      if (ua.includes("clash"))   target="clash";
+      if (ua.includes("singbox")) target="singbox";
+      if (ua.includes("surge"))   target="surge";
+      if (fmt) target = fmt.split("&")[0];
+
+      if (target) {
+        const r = await fto(convUrl(fmt||target), 6500);
+        return new Response(await r.text(), {
+          headers: {"content-type":"text/plain; charset=utf-8","cache-control":"no-store"},
+        });
+      }
+
+      return new Response(b64(body), {
+        headers: {"content-type":"text/plain; charset=utf-8","cache-control":"no-store"},
+      });
+
+    } catch(e) {
+      return new Response("ERR\n"+(e&&e.stack?e.stack:String(e)), {
+        status:500,
+        headers: {"content-type":"text/plain; charset=utf-8"},
+      });
+    }
   },
 };
