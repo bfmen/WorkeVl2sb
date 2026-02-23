@@ -26,7 +26,7 @@
  */
 
 // ---- 模块级常量 ----
-const DEFAULT_SUB_CONVERTER = "SUBAPI.cmliussss.net";
+const DEFAULT_SUB_CONVERTER = "sub.096000.xyz";
 const DEFAULT_SUB_PROTOCOL  = "https";
 const DEFAULT_SUB_CONFIG    =
   "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
@@ -624,3 +624,4 @@ export default {
     });
   },
 };
+
