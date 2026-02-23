@@ -5,144 +5,222 @@ let addressescsv = [];
 let DLS = 7;
 let remarkIndex = 1;
 
-let subConverter = 'SUBAPI.cmliussss.net';
+let subConverter = 'sub.096000.xyz';
 let subProtocol = 'https';
 let subConfig = 'https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini';
 
 let FileName = '优选订阅生成器';
 let alpn = '';
-let fp = 'chrome';   // 🔥 默认强制 chrome 指纹
+let fp = 'chrome'; // 默认强制 chrome
 
 const regex = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[.*\]):?(\d+)?#?(.*)?$/;
 
-function utf8ToBase64(str) {
-	return btoa(unescape(encodeURIComponent(str)));
+async function parseList(content) {
+  if (!content) return [];
+  return content
+    .replace(/[ \t|"'\r\n]+/g, ',')
+    .replace(/,+/g, ',')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 }
 
-async function 整理(content) {
-	return content
-		.replace(/[	|"'\r\n]+/g, ',')
-		.replace(/,+/g, ',')
-		.split(',')
-		.filter(Boolean);
+async function fetchAPIList(apiList) {
+  if (!apiList.length) return [];
+  let result = [];
+
+  await Promise.allSettled(apiList.map(async url => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return;
+      const text = await r.text();
+      result = result.concat(
+        text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      );
+    } catch {}
+  }));
+
+  return result;
 }
 
-async function 整理优选列表(api) {
-	if (!api || api.length === 0) return [];
-	let result = [];
+async function fetchCSVList(tls) {
+  if (!addressescsv.length) return [];
+  let result = [];
 
-	await Promise.allSettled(api.map(async url => {
-		try {
-			const r = await fetch(url);
-			if (!r.ok) return;
-			const text = await r.text();
-			const lines = text.split(/\r?\n/).filter(Boolean);
-			result = result.concat(lines);
-		} catch {}
-	}));
+  function parseCSV(text) {
+    return text
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .filter(Boolean)
+      .map(line => line.split(',').map(c => c.trim()));
+  }
 
-	return result;
+  await Promise.all(addressescsv.map(async url => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return;
+      const text = await r.text();
+      const rows = parseCSV(text);
+      const [header, ...data] = rows;
+
+      const tlsIndex = header.findIndex(c => c.toUpperCase() === 'TLS');
+      if (tlsIndex === -1) return;
+
+      for (const row of data) {
+        const tlsValue = (row[tlsIndex] || '').toUpperCase();
+        const speed = parseFloat(row[row.length - 1] || '0');
+        if (tlsValue === tls.toUpperCase() && speed > DLS) {
+          result.push(`${row[0]}:${row[1]}#${row[tlsIndex + remarkIndex] || row[0]}`);
+        }
+      }
+    } catch {}
+  }));
+
+  return result;
 }
 
-async function 整理测速结果(tls) {
-	if (!addressescsv.length) return [];
-	let result = [];
-
-	await Promise.all(addressescsv.map(async url => {
-		try {
-			const r = await fetch(url);
-			const text = await r.text();
-			const rows = text.split(/\r?\n/).map(l => l.split(','));
-			const header = rows.shift();
-			const tlsIndex = header.findIndex(c => c.toUpperCase() === 'TLS');
-			rows.forEach(row => {
-				if (row[tlsIndex]?.toUpperCase() === tls && parseFloat(row[row.length - 1]) > DLS) {
-					result.push(`${row[0]}:${row[1]}#${row[tlsIndex + remarkIndex]}`);
-				}
-			});
-		} catch {}
-	}));
-
-	return result;
+function safeBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
-async function subHtml(request) {
-	return new Response(`
-	<html>
-	<head><title>${FileName}</title></head>
-	<body>
-	<input id="link" placeholder="输入节点链接" style="width:100%">
-	<button onclick="gen()">生成</button>
-	<input id="out" style="width:100%" readonly>
-	<script>
-	function gen(){
-		let link=document.getElementById("link").value;
-		let domain=location.hostname;
-		if(link.startsWith("vmess://")){
-			let j=JSON.parse(atob(link.split("vmess://")[1]));
-			document.getElementById("out").value=
-			"https://"+domain+"/sub?host="+j.host+"&uuid="+j.id+"&path="+encodeURIComponent(j.path||"/")+"&sni="+(j.sni||j.host);
-		}else{
-			let uuid=link.split("//")[1].split("@")[0];
-			let search=link.split("?")[1].split("#")[0];
-			document.getElementById("out").value=
-			"https://"+domain+"/sub?uuid="+uuid+"&"+search;
-		}
-	}
-	</script>
-	</body>
-	</html>
-	`, { headers: { "content-type": "text/html" } });
+async function renderHTML() {
+  return new Response(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${FileName}</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js"></script>
+<style>
+body{font-family:system-ui;max-width:760px;margin:30px auto;padding:0 15px}
+input,button{width:100%;padding:12px;margin:8px 0;font-size:16px}
+#qrcode{text-align:center;margin-top:20px}
+</style>
+</head>
+<body>
+<h2>${FileName}</h2>
+
+<input id="link" placeholder="输入 VMess / VLESS / Trojan 链接">
+<button onclick="generate()">生成订阅</button>
+<input id="result" readonly onclick="copy()">
+<div id="qrcode"></div>
+
+<script>
+function copy(){
+  const v=document.getElementById("result").value;
+  if(!v)return;
+  navigator.clipboard.writeText(v);
+}
+
+function generate(){
+  const link=document.getElementById("link").value.trim();
+  if(!link){alert("请输入节点");return;}
+  const domain=location.hostname;
+  let sub="";
+  try{
+    if(link.startsWith("vmess://")){
+      const j=JSON.parse(atob(link.slice(8)));
+      sub="https://"+domain+"/sub?host="+j.host+"&uuid="+j.id+
+      "&path="+encodeURIComponent(j.path||"/")+
+      "&sni="+(j.sni||j.host);
+    }else{
+      const uuid=link.split("//")[1].split("@")[0];
+      const search=link.split("?")[1].split("#")[0];
+      sub="https://"+domain+"/sub?uuid="+uuid+"&"+search;
+    }
+    document.getElementById("result").value=sub;
+    const qr=document.getElementById("qrcode");
+    qr.innerHTML="";
+    new QRCode(qr,{text:sub,width:200,height:200});
+  }catch{
+    alert("格式错误");
+  }
+}
+</script>
+</body>
+</html>`, { headers: { "content-type": "text/html;charset=utf-8" } });
+}
+
+function normalizeSubApi(v){
+  if(!v) return {host:subConverter,proto:subProtocol};
+  if(v.startsWith("http://")) return {host:v.replace("http://",""),proto:"http"};
+  if(v.startsWith("https://")) return {host:v.replace("https://",""),proto:"https"};
+  return {host:v,proto:"https"};
 }
 
 export default {
-	async fetch(request, env) {
+  async fetch(request, env) {
 
-		addresses = env.ADD ? await 整理(env.ADD) : [];
-		addressesapi = env.ADDAPI ? await 整理(env.ADDAPI) : [];
-		addressescsv = env.ADDCSV ? await 整理(env.ADDCSV) : [];
+    addresses = env.ADD ? await parseList(env.ADD) : [];
+    addressesapi = env.ADDAPI ? await parseList(env.ADDAPI) : [];
+    addressescsv = env.ADDCSV ? await parseList(env.ADDCSV) : [];
 
-		subConverter = env.SUBAPI || subConverter;
-		subConfig = env.SUBCONFIG || subConfig;
+    DLS = Number(env.DLS) || DLS;
+    remarkIndex = Number(env.CSVREMARK) || remarkIndex;
 
-		const url = new URL(request.url);
+    FileName = env.SUBNAME || FileName;
+    subConfig = env.SUBCONFIG || subConfig;
 
-		if (!url.pathname.includes("/sub")) {
-			return subHtml(request);
-		}
+    const n = normalizeSubApi(env.SUBAPI);
+    subConverter = n.host;
+    subProtocol = n.proto;
 
-		let host = url.searchParams.get('host');
-		let uuid = url.searchParams.get('uuid') || url.searchParams.get('password');
-		let path = url.searchParams.get('path') || "/";
-		let sni = url.searchParams.get('sni') || host;
-		let type = url.searchParams.get('type') || "ws";
-		alpn = url.searchParams.get('alpn') || "";
+    fp = env.FP || fp;
 
-		if (!host || !uuid) {
-			return new Response("缺少 host 或 uuid", { status: 400 });
-		}
+    const url = new URL(request.url);
+    const ua = (request.headers.get("User-Agent") || "").toLowerCase();
+    const format = (url.searchParams.get("format") || "").toLowerCase();
 
-		const newapi = await 整理优选列表(addressesapi);
-		const newcsv = await 整理测速结果('TRUE');
-		const all = Array.from(new Set(addresses.concat(newapi, newcsv)));
+    if (!url.pathname.includes("/sub")) {
+      return renderHTML();
+    }
 
-		const result = all.map(address => {
-			let port = "443";
-			let addressid = address;
-			const match = address.match(regex);
-			if (match) {
-				address = match[1];
-				port = match[2] || port;
-				addressid = match[3] || address;
-			}
+    const host = url.searchParams.get("host");
+    const uuid = url.searchParams.get("uuid") || url.searchParams.get("password");
+    const path = (url.searchParams.get("path") || "/");
+    const sni = url.searchParams.get("sni") || host;
+    const type = url.searchParams.get("type") || "ws";
+    alpn = url.searchParams.get("alpn") || "";
 
-			return `vless://${uuid}@${address}:${port}?security=tls&sni=${sni}&alpn=${encodeURIComponent(alpn)}&fp=${fp}&type=${type}&host=${host}&path=${encodeURIComponent(path)}#${encodeURIComponent(addressid)}`;
-		}).join("\n");
+    if (!host || !uuid) {
+      return new Response("缺少 host 或 uuid", { status: 400 });
+    }
 
-		const base64 = btoa(result);
+    const apiList = await fetchAPIList(addressesapi);
+    const csvList = await fetchCSVList("TRUE");
+    const all = Array.from(new Set(addresses.concat(apiList, csvList)));
 
-		return new Response(base64, {
-			headers: { "content-type": "text/plain" }
-		});
-	}
+    const content = all.map(addr=>{
+      let address=addr, port="443", remark=addr;
+      const m=addr.match(regex);
+      if(m){address=m[1];port=m[2]||port;remark=m[3]||address;}
+      return \`vless://\${uuid}@\${address}:\${port}?security=tls&sni=\${sni}&alpn=\${encodeURIComponent(alpn)}&fp=\${fp}&type=\${type}&host=\${host}&path=\${encodeURIComponent(path)}#\${encodeURIComponent(remark)}\`;
+    }).join("\\n");
+
+    if (ua.includes("clash") || format==="clash"){
+      const self=url.href;
+      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=clash&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+      return new Response(await r.text());
+    }
+
+    if (ua.includes("singbox") || format==="singbox"){
+      const self=url.href;
+      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=singbox&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+      return new Response(await r.text());
+    }
+
+    if (ua.includes("surge") || format==="surge"){
+      const self=url.href;
+      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=surge&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+      return new Response(await r.text());
+    }
+
+    return new Response(safeBase64(content), {
+      headers: { "content-type": "text/plain" }
+    });
+  }
 };
