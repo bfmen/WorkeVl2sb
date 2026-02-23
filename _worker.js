@@ -4,7 +4,8 @@ const D_SH = "sub.096000.xyz",
   D_NAME = "优选订阅生成器",
   D_FP = "chrome",
   D_DLS = 7,
-  D_RMK = 1;
+  D_RMK = 1,
+  D_ALPN = "h2"; // ✅ 默认 ALPN
 
 const R_ADDR = /^(\[[^\]]+\]|[\w.\-]+):?(\d+)?(?:#(.*))?$/;
 
@@ -64,15 +65,16 @@ async function fetchAPI(arr) {
   await Promise.allSettled(
     arr.map(async (u) => {
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 5000); 
+      const t = setTimeout(() => c.abort(), 5000);
       try {
         const fetchUrl = u.startsWith("http") ? u : "https://" + u;
-        const r = await fetch(fetchUrl, { 
-          signal: c.signal, 
-          headers: { 
-            "Accept": "text/plain,*/*",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          } 
+        const r = await fetch(fetchUrl, {
+          signal: c.signal,
+          headers: {
+            Accept: "text/plain,*/*",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
         });
         if (!r.ok) return;
         (await r.text())
@@ -81,8 +83,7 @@ async function fetchAPI(arr) {
             const s = l.trim();
             if (s) out.push(s);
           });
-      } catch {}
-      finally {
+      } catch {} finally {
         clearTimeout(t);
       }
     })
@@ -99,12 +100,12 @@ async function fetchCSV(arr, tls, dls, rmk) {
       const t = setTimeout(() => c.abort(), 5000);
       try {
         const fetchUrl = u.startsWith("http") ? u : "https://" + u;
-        const r = await fetch(fetchUrl, { 
-          signal: c.signal, 
-          headers: { 
-            "Accept": "text/plain,*/*",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          } 
+        const r = await fetch(fetchUrl, {
+          signal: c.signal,
+          headers: {
+            Accept: "text/plain,*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
         });
         if (!r.ok) return;
 
@@ -133,8 +134,7 @@ async function fetchCSV(arr, tls, dls, rmk) {
           const remark = ri >= 0 && ri < row.length && row[ri] ? row[ri] : row[0];
           out.push(ad + ":" + pt + "#" + remark);
         }
-      } catch {}
-      finally {
+      } catch {} finally {
         clearTimeout(t);
       }
     })
@@ -142,7 +142,7 @@ async function fetchCSV(arr, tls, dls, rmk) {
   return out;
 }
 
-/* ---------- config + upstream (移除缓存逻辑) ---------- */
+/* ---------- config + upstream ---------- */
 async function getCfg(env) {
   const k = [
     env.ADD,
@@ -154,6 +154,7 @@ async function getCfg(env) {
     env.FP,
     env.DLS,
     env.CSVREMARK,
+    env.ALPN, // ✅ ALPN 纳入缓存键
   ].join("|");
   if (_K === k && _C) return _C;
 
@@ -169,6 +170,7 @@ async function getCfg(env) {
     sh: n.h,
     sp: n.p,
     fp: normFP(env.FP || D_FP),
+    alpn: ((env.ALPN || D_ALPN || "") + "").trim() || "h2",
   };
   _K = k;
   return _C;
@@ -181,8 +183,9 @@ async function getUpstreamsRealtime(cfg) {
 }
 
 /* ---------------- HTML (极简) ---------------- */
-function makeHTML(title) {
+function makeHTML(title, defAlpn) {
   const t = esc(title);
+  const a = (defAlpn || "h2").toString().trim() || "h2";
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
@@ -239,6 +242,7 @@ textarea{min-height:96px;resize:vertical}
 </div>
 
 <script>
+var DEF_ALPN = ${JSON.stringify(a)};
 var u0='';
 
 function se(m){var e=document.getElementById('er');e.textContent=m;e.className='err on';}
@@ -262,26 +266,41 @@ function gen(){
   he();
   var l=document.getElementById('lk').value.trim();
   if(!l){se('请输入节点链接');return;}
+
   try{
+    var defAlpn = (DEF_ALPN || 'h2');
+
     if(l.indexOf('vmess://')===0){
       var raw=atob(b64fix(l.slice(8)));
       var j=JSON.parse(raw);
+      var alpn = (j.alpn || defAlpn);
+
       u0=location.origin+'/sub?host='+encodeURIComponent(j.host||j.add||'')
         +'&uuid='+encodeURIComponent(j.id||'')
         +'&path='+encodeURIComponent(j.path||'/')
         +'&sni='+encodeURIComponent(j.sni||j.host||j.add||'')
         +'&type='+encodeURIComponent(j.net||'ws')
-        +'&fp=chrome';
+        +'&fp=chrome'
+        +'&alpn='+encodeURIComponent(alpn);
+
     } else if(l.indexOf('vless://')===0||l.indexOf('trojan://')===0){
       var uu=l.split('//')[1].split('@')[0];
       var ap=l.split('@')[1]||'';
       var qi=ap.indexOf('?');
-      var s=qi>=0?ap.slice(qi+1).split('#')[0]:'';
-      u0=location.origin+'/sub?uuid='+encodeURIComponent(uu)+(s?'&'+s:'');
+      var qs=qi>=0?ap.slice(qi+1).split('#')[0]:'';
+
+      var sp = new URLSearchParams(qs);
+      var alpn = sp.get('alpn') || defAlpn;
+      if(!sp.get('alpn')) sp.set('alpn', alpn);
+
+      var newQs = sp.toString();
+      u0=location.origin+'/sub?uuid='+encodeURIComponent(uu)+(newQs?('&'+newQs):'');
+
     } else {
       se('仅支持 vmess:// / vless:// / trojan://');
       return;
     }
+
     show(u0);
   } catch(e){
     se('解析失败：链接格式有误');
@@ -328,13 +347,12 @@ function rqr(txt){
 
   if(typeof QRious !== 'function'){
     box.innerHTML='<div class="qre" style="color:var(--m)">正在加载组件...</div>';
-    
     var cdns = [
       'https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js',
       'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js',
       'https://unpkg.com/qrious@4.0.2/dist/qrious.min.js'
     ];
-    
+
     function loadCDN(index) {
       if (index >= cdns.length) {
         box.innerHTML='<div class="qre">组件加载失败，请检查网络或直接复制链接</div>';
@@ -346,7 +364,7 @@ function rqr(txt){
       script.onerror = function() { loadCDN(index + 1); };
       document.head.appendChild(script);
     }
-    
+
     loadCDN(0);
   } else {
     drawQR();
@@ -364,10 +382,10 @@ document.addEventListener('DOMContentLoaded', function(){
 
 /* ---------------- Worker ---------------- */
 export default {
-  async fetch(request, env) { // 移除了没用的 ctx
+  async fetch(request, env) {
     try {
       const cfg = await getCfg(env);
-      const { a0, name, sc, sh, sp, fp } = cfg;
+      const { a0, name, sc, sh, sp, fp, alpn: defAlpn } = cfg;
 
       const url = new URL(request.url);
       const ua = ((request.headers.get("User-Agent") || "") + "").toLowerCase();
@@ -375,13 +393,26 @@ export default {
 
       // 首页：极简生成器
       if (url.pathname !== "/sub") {
-        return new Response(makeHTML(name), {
+        return new Response(makeHTML(name, defAlpn), {
           headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
         });
       }
 
       // /sub：生成 vless 列表 + 可选转换
-      const KP = new Set(["host", "uuid", "password", "path", "sni", "type", "fp", "alpn", "security", "encryption", "format"]);
+      const KP = new Set([
+        "host",
+        "uuid",
+        "password",
+        "path",
+        "sni",
+        "type",
+        "fp",
+        "alpn",
+        "security",
+        "encryption",
+        "format",
+      ]);
+
       let host = "",
         uuid = "",
         path = "/",
@@ -389,7 +420,7 @@ export default {
         type = "ws";
 
       let qfp = normFP(url.searchParams.get("fp") || fp);
-      let alpn = url.searchParams.get("alpn") || "";
+      let alpn = url.searchParams.get("alpn") || defAlpn || "h2"; // ✅ 默认 h2
 
       // 透传其它参数
       const ex = [];
@@ -416,12 +447,18 @@ export default {
 
       const qsFixed =
         "security=tls" +
-        "&sni=" + encodeURIComponent(sni) +
-        "&alpn=" + encodeURIComponent(alpn) +
-        "&fp=" + encodeURIComponent(qfp) +
-        "&type=" + encodeURIComponent(type) +
-        "&host=" + encodeURIComponent(host) +
-        "&path=" + encodeURIComponent(path) +
+        "&sni=" +
+        encodeURIComponent(sni) +
+        "&alpn=" +
+        encodeURIComponent(alpn) +
+        "&fp=" +
+        encodeURIComponent(qfp) +
+        "&type=" +
+        encodeURIComponent(type) +
+        "&host=" +
+        encodeURIComponent(host) +
+        "&path=" +
+        encodeURIComponent(path) +
         "&encryption=none" +
         extra;
 
