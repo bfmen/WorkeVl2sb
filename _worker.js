@@ -53,10 +53,7 @@ async function fto(u, ms) {
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), ms);
   try {
-    return await fetch(u, {
-      signal: c.signal,
-      headers: { Accept: "text/plain,*/*" },
-    });
+    return await fetch(u, { signal: c.signal, headers: { Accept: "text/plain,*/*" } });
   } finally {
     clearTimeout(t);
   }
@@ -180,10 +177,7 @@ async function cachePutJSON(key, obj, ttl = 60) {
   const cache = caches.default;
   const req = new Request("https://cache.local/" + key);
   const res = new Response(JSON.stringify(obj), {
-    headers: {
-      "content-type": "application/json",
-      "cache-control": `public, max-age=${ttl}`,
-    },
+    headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttl}` },
   });
   await cache.put(req, res);
 }
@@ -204,7 +198,6 @@ async function getUpstreamsCached(cfg) {
 /* ---------------- HTML ---------------- */
 function makeHTML(title) {
   const t = esc(title);
-  const note = "明文模式 — 已移除 SECRET 功能（format 按钮可切换输出）";
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
@@ -214,112 +207,124 @@ function makeHTML(title) {
 <style>
 :root{--bg:#0a0a0f;--s:#13131a;--s2:#1c1c27;--b:#2a2a38;--a:#00e5ff;--a2:#7c3aed;--tx:#e8e8f0;--m:#6b6b80;--ok:#00ff9d;--w:#ffb800}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
-body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");opacity:.5}
-body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(var(--b) 1px,transparent 1px),linear-gradient(90deg,var(--b) 1px,transparent 1px);background-size:48px 48px;opacity:.3}
-.wrap{position:relative;z-index:1;width:100%;max-width:640px}
-.hd{margin-bottom:36px}
+body{font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.wrap{width:100%;max-width:640px}
+.hd{margin-bottom:24px}
 .tag{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--a);opacity:.8;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .tag::before{content:'';display:block;width:22px;height:1px;background:var(--a)}
-.tt{font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.tt{font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .sub{margin-top:8px;font-size:13px;color:var(--m);display:flex;align-items:center;gap:6px}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--w);animation:pulse 2s ease-in-out infinite}
-.card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:22px 20px;margin-bottom:12px;position:relative;overflow:hidden;transition:border-color .2s}
-.card:focus-within{border-color:var(--a)}
+.card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:22px 20px;margin-bottom:12px}
 .lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--m);margin-bottom:10px}
-textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;resize:vertical;outline:none;transition:border-color .2s,box-shadow .2s}
-textarea{min-height:96px}
-textarea:focus,input[type=text]:focus{border-color:var(--a);box-shadow:0 0 0 2px rgba(0,229,255,.12)}
-textarea::placeholder,input[type=text]::placeholder{color:var(--m);opacity:.6}
-.btn{width:100%;padding:14px 20px;border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(135deg,var(--a2),var(--a));color:#000;transition:transform .15s,box-shadow .15s,filter .15s;position:relative;overflow:hidden}
-.btn:hover{transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,229,255,.25);filter:brightness(1.05)}
-.btn:active{transform:translateY(0)}
+textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;outline:none}
+textarea{min-height:96px;resize:vertical}
+.btn{width:100%;padding:14px 20px;border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(135deg,var(--a2),var(--a));color:#000}
 .rrow{display:flex;gap:8px;align-items:stretch}
 .ri{flex:1;cursor:pointer}
-.cpb{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;transition:all .2s;white-space:nowrap}
-.cpb:hover{border-color:var(--a);color:var(--a)}
+.cpb{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;white-space:nowrap}
 .cpb.ok{border-color:var(--ok);color:var(--ok)}
 .fg{margin-top:14px}
 .fl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m);margin-bottom:7px;opacity:.6}
 .fs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-.f{padding:5px 11px;border-radius:6px;border:1px solid var(--b);background:transparent;color:var(--m);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;transition:all .2s;letter-spacing:.05em}
-.f:hover{border-color:var(--a2);color:var(--a2)}
+.f{padding:5px 11px;border-radius:6px;border:1px solid var(--b);background:transparent;color:var(--m);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px}
 .f.on{border-color:var(--a);color:var(--a);background:rgba(0,229,255,.08)}
-#qr{margin-top:16px;display:flex;justify-content:center;min-height:20px}
-#qr canvas{border-radius:10px;border:1px solid var(--b)}
-#qr .qre{font-size:12px;color:#ff6b6b;opacity:.9}
 .err{display:none;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.3);background:rgba(255,80,80,.08);color:#ff6b6b;font-size:13px}
 .err.on{display:block}
-.ft{margin-top:24px;font-size:11px;color:var(--m);text-align:center;opacity:.4}
 .rw{display:none;margin-top:12px}
-.rw.on{display:block;animation:fadeUp .3s ease}
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.rw.on{display:block}
+#qr{margin-top:16px;display:flex;justify-content:center;min-height:24px}
+#qr .qre{font-size:12px;color:#ff6b6b;opacity:.95}
+#qr canvas{border-radius:10px;border:1px solid var(--b)}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
-@media(max-width:480px){.card{padding:16px 14px}}
 </style></head><body>
 <div class="wrap">
   <div class="hd">
     <div class="tag">Subscription Generator</div>
     <h1 class="tt">${t}</h1>
-    <div class="sub"><span class="dot"></span>${note}</div>
+    <div class="sub"><span class="dot"></span>明文模式 — 已移除 SECRET（按钮切换 format 输出）</div>
   </div>
+
   <div class="card">
     <div class="lab">节点链接</div>
     <textarea id="lk" placeholder="粘贴 vmess:// / vless:// / trojan:// 链接..."></textarea>
     <div class="err" id="er"></div>
   </div>
-  <button class="btn" type="button" onclick="gen()">⚡ 生成订阅链接</button>
+
+  <button class="btn" id="genBtn" type="button">⚡ 生成订阅链接</button>
+
   <div class="rw" id="rw">
     <div class="card">
       <div class="lab">订阅链接</div>
       <div class="rrow">
-        <input type="text" class="ri" id="ou" readonly onclick="doCopy()">
-        <button class="cpb" id="cb" type="button" onclick="doCopy()">复制</button>
+        <input type="text" class="ri" id="ou" readonly>
+        <button class="cpb" id="cb" type="button">复制</button>
       </div>
+
       <div class="fg">
         <div class="fl">常用</div>
-        <div class="fs">
-          <button class="f on" type="button" onclick="sw(this,'')">Base64</button>
-          <button class="f" type="button" onclick="sw(this,'clash')">Clash</button>
-          <button class="f" type="button" onclick="sw(this,'clashr')">ClashR</button>
-          <button class="f" type="button" onclick="sw(this,'singbox')">Sing-Box</button>
-          <button class="f" type="button" onclick="sw(this,'v2ray')">V2Ray</button>
+        <div class="fs" id="fmt1">
+          <button class="f on" type="button" data-fmt="">Base64</button>
+          <button class="f" type="button" data-fmt="clash">Clash</button>
+          <button class="f" type="button" data-fmt="clashr">ClashR</button>
+          <button class="f" type="button" data-fmt="singbox">Sing-Box</button>
+          <button class="f" type="button" data-fmt="v2ray">V2Ray</button>
         </div>
+
         <div class="fl">Surge</div>
-        <div class="fs">
-          <button class="f" type="button" onclick="sw(this,'surge&ver=2')">Surge 2</button>
-          <button class="f" type="button" onclick="sw(this,'surge&ver=3')">Surge 3</button>
-          <button class="f" type="button" onclick="sw(this,'surge&ver=4')">Surge 4</button>
-          <button class="f" type="button" onclick="sw(this,'surge&ver=5')">Surge 5</button>
+        <div class="fs" id="fmt2">
+          <button class="f" type="button" data-fmt="surge&ver=2">Surge 2</button>
+          <button class="f" type="button" data-fmt="surge&ver=3">Surge 3</button>
+          <button class="f" type="button" data-fmt="surge&ver=4">Surge 4</button>
+          <button class="f" type="button" data-fmt="surge&ver=5">Surge 5</button>
         </div>
+
         <div class="fl">其他</div>
-        <div class="fs">
-          <button class="f" type="button" onclick="sw(this,'quan')">Quantumult</button>
-          <button class="f" type="button" onclick="sw(this,'quanx')">Quantumult X</button>
-          <button class="f" type="button" onclick="sw(this,'loon')">Loon</button>
-          <button class="f" type="button" onclick="sw(this,'surfboard')">Surfboard</button>
-          <button class="f" type="button" onclick="sw(this,'ss')">SS (SIP002)</button>
-          <button class="f" type="button" onclick="sw(this,'sssub')">SS Android</button>
-          <button class="f" type="button" onclick="sw(this,'ssr')">SSR</button>
-          <button class="f" type="button" onclick="sw(this,'ssd')">SSD</button>
+        <div class="fs" id="fmt3">
+          <button class="f" type="button" data-fmt="quan">Quantumult</button>
+          <button class="f" type="button" data-fmt="quanx">Quantumult X</button>
+          <button class="f" type="button" data-fmt="loon">Loon</button>
+          <button class="f" type="button" data-fmt="surfboard">Surfboard</button>
+          <button class="f" type="button" data-fmt="ss">SS (SIP002)</button>
+          <button class="f" type="button" data-fmt="sssub">SS Android</button>
+          <button class="f" type="button" data-fmt="ssr">SSR</button>
+          <button class="f" type="button" data-fmt="ssd">SSD</button>
         </div>
       </div>
+
       <div id="qr"></div>
     </div>
   </div>
-  <div class="ft">Powered by Cloudflare Workers</div>
 </div>
+
 <script>
 var u0='';
 
 function se(m){var e=document.getElementById('er');e.textContent=m;e.className='err on';}
 function he(){document.getElementById('er').className='err';}
 
-// vmess base64/base64url 修复
 function b64fix(s){
   s=(s||'').trim().replace(/-/g,'+').replace(/_/g,'/');
   while(s.length%4)s+='=';
   return s;
+}
+
+function bld(f){
+  if(!u0)return '';
+  if(!f)return u0;
+  var sep=u0.indexOf('?')>=0?'&':'?';
+  if(f.indexOf('&')>=0){
+    var p=f.split('&');
+    return u0+sep+'format='+p[0]+'&'+p.slice(1).join('&');
+  }
+  return u0+sep+'format='+f;
+}
+
+function show(x){
+  var rw=document.getElementById('rw');
+  rw.className='rw on';
+  document.getElementById('ou').value=x;
+  rqr(x);
 }
 
 function gen(){
@@ -346,38 +351,17 @@ function gen(){
       se('仅支持 vmess:// / vless:// / trojan://');
       return;
     }
+
+    // 默认选中 Base64
+    document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});
+    var first=document.querySelector('#fmt1 .f[data-fmt=""]');
+    if(first) first.classList.add('on');
+
     show(bld(''));
+    document.getElementById('rw').scrollIntoView({behavior:'smooth',block:'nearest'});
   } catch(e) {
     se('解析失败：链接格式有误');
   }
-}
-
-function bld(f){
-  if(!u0)return '';
-  if(!f)return u0;
-  var sep=u0.indexOf('?')>=0?'&':'?';
-  if(f.indexOf('&')>=0){
-    var p=f.split('&');
-    return u0+sep+'format='+p[0]+'&'+p.slice(1).join('&');
-  }
-  return u0+sep+'format='+f;
-}
-
-function show(x){
-  var rw=document.getElementById('rw');
-  rw.className='rw on';
-  document.getElementById('ou').value=x;
-  rqr(x);
-  rw.scrollIntoView({behavior:'smooth',block:'nearest'});
-}
-
-function sw(b,f){
-  if(!u0)return;
-  document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});
-  b.classList.add('on');
-  var x=bld(f);
-  document.getElementById('ou').value=x;
-  rqr(x);
 }
 
 function doCopy(){
@@ -390,18 +374,23 @@ function doCopy(){
   });
 }
 
+// 关键修复：链接太长就不生成二维码（避免“失败”）
 function rqr(txt){
   var box=document.getElementById('qr');
   box.innerHTML='';
   if(!txt)return;
 
+  // 经验阈值：URL 超过 ~900 字符，很多 QR 实现都会失败/溢出
+  if(txt.length>900){
+    box.innerHTML='<div class="qre">链接过长，无法生成二维码（请直接复制订阅链接）</div>';
+    return;
+  }
+
   if(typeof QRCode!=='function'){
     box.innerHTML='<div class="qre">QRCode 未加载</div>';
     return;
   }
-
   try{
-    // 这里用 M（中等纠错），库已修复支持 L/M/Q/H
     var qr=QRCode(0,'M');
     qr.addData(txt);
     qr.make();
@@ -417,37 +406,48 @@ function rqr(txt){
         if(qr.isDark(r,col))
           ctx.fillRect(mg+col*sc,mg+r*sc,sc,sc);
   } catch(e){
-    box.innerHTML='<div class="qre">二维码生成失败</div>';
+    box.innerHTML='<div class="qre">二维码生成失败（请直接复制订阅链接）</div>';
   }
 }
 
-/* --- embedded QR encoder (修复 EC 映射) --- */
+document.addEventListener('DOMContentLoaded', function(){
+  document.getElementById('genBtn').addEventListener('click', gen);
+  document.getElementById('cb').addEventListener('click', doCopy);
+  document.getElementById('ou').addEventListener('click', doCopy);
+
+  // 关键修复：统一绑定 format 按钮事件，点了必变
+  document.querySelectorAll('.f').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(!u0) return;
+      document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});
+      btn.classList.add('on');
+      var f=btn.getAttribute('data-fmt')||'';
+      show(bld(f));
+    });
+  });
+});
+
+/* --- embedded QR encoder (保持你原来的版本，最小改动) --- */
 (function(g){
 function QR8bitByte(d){this.mode=1;this.data=d;}
 QR8bitByte.prototype.getLength=function(){return this.data.length;};
 QR8bitByte.prototype.write=function(b){for(var i=0;i<this.data.length;i++)b.put(this.data.charCodeAt(i),8);};
-
 function QRBitBuffer(){this.buffer=[];this.length=0;}
 QRBitBuffer.prototype.get=function(i){return((this.buffer[Math.floor(i/8)]>>>(7-i%8))&1)===1;};
 QRBitBuffer.prototype.put=function(n,l){for(var i=0;i<l;i++)this.putBit(((n>>>(l-i-1))&1)===1);};
 QRBitBuffer.prototype.putBit=function(b){var i=Math.floor(this.length/8);if(this.buffer.length<=i)this.buffer.push(0);if(b)this.buffer[i]|=(0x80>>>(this.length%8));this.length++;};
-
 function QRPolynomial(n,s){var o=0;while(o<n.length&&n[o]===0)o++;this.num=new Array(n.length-o+s);for(var i=0;i<n.length-o;i++)this.num[i]=n[i+o];}
 QRPolynomial.prototype.get=function(i){return this.num[i];};
 QRPolynomial.prototype.getLength=function(){return this.num.length;};
 QRPolynomial.prototype.multiply=function(e){var n=new Array(this.getLength()+e.getLength()-1);for(var i=0;i<n.length;i++)n[i]=0;for(var i=0;i<this.getLength();i++)for(var j=0;j<e.getLength();j++)n[i+j]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(e.get(j)));return new QRPolynomial(n,0);};
 QRPolynomial.prototype.mod=function(e){if(this.getLength()-e.getLength()<0)return this;var r=QRMath.glog(this.get(0))-QRMath.glog(e.get(0));var n=new Array(this.getLength());for(var i=0;i<this.getLength();i++)n[i]=this.get(i);for(var i=0;i<e.getLength();i++)n[i]^=QRMath.gexp(QRMath.glog(e.get(i))+r);return new QRPolynomial(n,0).mod(e);};
-
 var QRMath={glog:function(n){if(n<1)throw new Error('glog');return QRMath.LOG_TABLE[n];},gexp:function(n){while(n<0)n+=255;while(n>=256)n-=255;return QRMath.EXP_TABLE[n];},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};
 for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;
 for(var i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];
 for(var i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;
-
 function QRRSBlock(t,d){this.totalCount=t;this.dataCount=d;}
-// 仍然只内置 L/M 表（够用）
 QRRSBlock.RS_BLOCK_TABLE={'1-L':[[1,26,19]],'1-M':[[1,26,16]],'2-L':[[1,44,34]],'2-M':[[1,44,28]],'3-L':[[1,70,55]],'3-M':[[1,70,44]],'4-L':[[1,100,80]],'4-M':[[2,50,32]],'5-L':[[1,134,108]],'5-M':[[2,67,43]],'6-L':[[2,86,68]],'6-M':[[4,43,27]],'7-L':[[2,98,78]],'7-M':[[4,49,31]],'8-L':[[2,121,97]],'8-M':[[2,60,38],[2,61,39]],'9-L':[[2,146,116]],'9-M':[[3,58,36],[2,59,37]],'10-L':[[2,86,68],[2,87,69]],'10-M':[[4,69,43],[1,70,44]]};
 QRRSBlock.getRSBlocks=function(tn,ec){var t=QRRSBlock.RS_BLOCK_TABLE[tn+'-'+ec];if(!t)throw new Error('bad type/ec');var l=[];for(var i=0;i<t.length;i++)for(var j=0;j<t[i][0];j++)l.push(new QRRSBlock(t[i][1],t[i][2]));return l;};
-
 function QRCodeModel(tn,ec){this.typeNumber=tn;this.errorCorrectLevel=ec;this.modules=null;this.moduleCount=0;this.dataCache=null;this.dataList=[];}
 QRCodeModel.prototype.addData=function(d){this.dataList.push(new QR8bitByte(d));this.dataCache=null;};
 QRCodeModel.prototype.isDark=function(r,c){return this.modules[r][c]===true;};
@@ -461,7 +461,6 @@ QRCodeModel.prototype.make=function(){
   }
   this._make(false,0);
 };
-
 QRCodeModel.prototype._make=function(test,mp){
   this.moduleCount=this.typeNumber*4+17;
   this.modules=[];
@@ -474,7 +473,6 @@ QRCodeModel.prototype._make=function(test,mp){
   if(!this.dataCache)this.dataCache=QRCodeModel.createData(this.typeNumber,this.errorCorrectLevel,this.dataList);
   this._mapData(this.dataCache,mp);
 };
-
 QRCodeModel.prototype._setupPositionProbePattern=function(row,col){
   for(var r=-1;r<=7;r++){
     if(row+r<=-1||this.moduleCount<=row+r)continue;
@@ -484,19 +482,15 @@ QRCodeModel.prototype._setupPositionProbePattern=function(row,col){
     }
   }
 };
-
 QRCodeModel.prototype._setupTimingPattern=function(){
   for(var i=8;i<this.moduleCount-8;i++){
     if(this.modules[i][6]==null)this.modules[i][6]=(i%2===0);
     if(this.modules[6][i]==null)this.modules[6][i]=(i%2===0);
   }
 };
-
-// 修复：EC 映射（L/M/Q/H）
-// 注意：本内置 RS 表只有 L/M，所以你用 Q/H 会在 getRSBlocks 抛错（但 UI 用的是 M）
 QRCodeModel.prototype._setupTypeInfo=function(test,mp){
-  var map={L:1,M:0,Q:3,H:2};
-  var ec = (map[this.errorCorrectLevel]!==undefined)?map[this.errorCorrectLevel]:0;
+  // 注意：这里库只支持 L/M 表，UI 用 M 没问题
+  var ec=(this.errorCorrectLevel==='L')?1:0;
   var bits=QRCodeModel.getBCHTypeInfo((ec<<3)|mp);
   for(var i=0;i<15;i++){
     var m=(!test&&((bits>>i)&1)===1);
@@ -512,7 +506,6 @@ QRCodeModel.prototype._setupTypeInfo=function(test,mp){
   }
   this.modules[this.moduleCount-8][8]=(!test);
 };
-
 QRCodeModel.prototype._mapData=function(data,mp){
   var inc=-1,row=this.moduleCount-1,bi=7,by=0;
   for(var col=this.moduleCount-1;col>0;col-=2){
@@ -533,13 +526,11 @@ QRCodeModel.prototype._mapData=function(data,mp){
     }
   }
 };
-
 QRCodeModel.PAD0=0xEC;QRCodeModel.PAD1=0x11;
 QRCodeModel.getBCHTypeInfo=function(d){var x=d<<10;while(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)>=0)x^=(0x537<<(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)));return((d<<10)|x)^0x5412;};
 QRCodeModel.getBCHDigit=function(d){var n=0;while(d!==0){n++;d>>>=1;}return n;};
 QRCodeModel.getMask=function(mp,i,j){return(i+j)%2===0;};
 QRCodeModel.getErrorCorrectPolynomial=function(ec){var a=new QRPolynomial([1],0);for(var i=0;i<ec;i++)a=a.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return a;};
-
 QRCodeModel.createData=function(tn,ec,dl){
   var rs=QRRSBlock.getRSBlocks(tn,ec);
   var buf=new QRBitBuffer();
@@ -551,7 +542,6 @@ QRCodeModel.createData=function(tn,ec,dl){
   while(true){if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD0,8);if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD1,8);}
   return QRCodeModel.createBytes(buf,rs);
 };
-
 QRCodeModel.createBytes=function(buf,rs){
   var off=0,mDc=0,mEc=0,dc=[],ec=[];
   for(var r=0;r<rs.length;r++){
@@ -570,7 +560,6 @@ QRCodeModel.createBytes=function(buf,rs){
   for(var i=0;i<mEc;i++)for(var r=0;r<rs.length;r++)if(i<ec[r].length)data[idx++]=ec[r][i];
   return data;
 };
-
 g.QRCode=function(t,l){return new QRCodeModel(t,l||'M');};
 })(window);
 </script>
@@ -590,10 +579,7 @@ export default {
 
       if (url.pathname !== "/sub") {
         return new Response(makeHTML(name), {
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            "cache-control": "public, max-age=300",
-          },
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
         });
       }
 
