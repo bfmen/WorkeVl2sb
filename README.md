@@ -32,7 +32,7 @@
 
 | 变量名 | 必填 | 说明 | 示例 |
 |--------|------|------|------|
-| `ADD` | ✅ | 优选 IP/域名列表，逗号或换行分隔 | `1.1.1.1:443,cf.example.com:443` |
+| `ADD` | ✅ | 优选 IP/域名列表，支持多种格式（见下方说明） | `yd.example.com:443,1.1.1.1:443` |
 | `ADDAPI` | ➖ | 返回优选地址的 API URL，逗号分隔 | `https://api.example.com/ips` |
 | `ADDCSV` | ➖ | 含测速结果的 CSV 文件 URL，逗号分隔 | `https://example.com/result.csv` |
 | `DLS` | ➖ | CSV 测速过滤阈值（默认 `7` MB/s） | `5` |
@@ -124,7 +124,40 @@ uuid、host、path 等敏感参数全部隐藏在 `data=` 密文中，服务端�
 > **经过 Cloudflare CDN 中转时，强烈建议使用 WebSocket 传输协议。**  
 > xhttp 为流式传输，Cloudflare 会缓冲请求体导致连接中断。
 
-### CSV 文件格式
+### ADD 变量格式说明
+
+支持以下所有写法，可以混合使用：
+
+```bash
+# 1. 纯域名（端口默认 443）
+yd.example.com,dx.example.com
+
+# 2. 域名 + 端口
+yd.example.com:443,dx.example.com:2053
+
+# 3. 纯 IP
+1.1.1.1:443,104.16.0.1:2083
+
+# 4. IPv6（用方括号包裹）
+[2606:4700::1]:443
+
+# 5. 带备注（# 后面是节点名称）
+yd.example.com:443#电信优选,dx.example.com:443#联通优选
+
+# 6. 换行分隔（在 Cloudflare 变量编辑器里直接回车）
+yd.example.com:443
+dx.example.com:443
+1.1.1.1:443
+
+# 7. 以上任意混合
+yd.example.com:443,dx.example.com,1.1.1.1:2083#美国,dx.example.com:2053#联通
+```
+
+> **端口说明：** 不填端口默认为 `443`。Cloudflare 支持的端口还有 `2053` `2083` `2087` `2096` `8443`。
+
+---
+
+
 
 `ADDCSV` 指向的 CSV 文件需满足以下格式要求：
 
