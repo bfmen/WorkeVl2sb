@@ -27,11 +27,9 @@ async function parseList(x) {
     .filter(Boolean);
 }
 
+// 优化 C：更稳、更高效的原生 Base64 编码，完美兼容 UTF-8
 function b64(s) {
-  const u = new TextEncoder().encode(s);
-  let b = "";
-  for (let i = 0; i < u.length; i++) b += String.fromCharCode(u[i]);
-  return btoa(b);
+  return btoa(unescape(encodeURIComponent(s)));
 }
 
 function normSub(v) {
@@ -173,16 +171,22 @@ async function cacheGetJSON(key) {
   }
 }
 
-async function cachePutJSON(key, obj, ttl = 60) {
+// 优化 B：引入 ctx 并使用 ctx.waitUntil 实现非阻塞后台缓存写入
+async function cachePutJSON(ctx, key, obj, ttl = 60) {
   const cache = caches.default;
   const req = new Request("https://cache.local/" + key);
   const res = new Response(JSON.stringify(obj), {
     headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttl}` },
   });
-  await cache.put(req, res);
+  
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(cache.put(req, res));
+  } else {
+    await cache.put(req, res);
+  }
 }
 
-async function getUpstreamsCached(cfg) {
+async function getUpstreamsCached(cfg, ctx) {
   const key =
     "up_" +
     b64(cfg.a1.join("|") + "|" + cfg.a2.join("|") + "|" + String(cfg.dls) + "|" + String(cfg.rmk));
@@ -191,37 +195,34 @@ async function getUpstreamsCached(cfg) {
 
   const [l1, l2] = await Promise.all([fetchAPI(cfg.a1), fetchCSV(cfg.a2, "TRUE", cfg.dls, cfg.rmk)]);
   const obj = { l1, l2 };
-  await cachePutJSON(key, obj, 60);
+  await cachePutJSON(ctx, key, obj, 60);
   return obj;
 }
 
 /* ---------------- HTML (极简) ---------------- */
 function makeHTML(title) {
   const t = esc(title);
+  // 优化 A：剔除 Google Fonts 依赖，改用系统原生字体族，提升渲染速度
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 <style>
 :root{--bg:#0a0a0f;--s:#13131a;--s2:#1c1c27;--b:#2a2a38;--a:#00e5ff;--a2:#7c3aed;--tx:#e8e8f0;--m:#6b6b80;--ok:#00ff9d}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+body{font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
 .wrap{width:100%;max-width:640px}
 .hd{margin-bottom:18px}
 .tag{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--a);opacity:.85;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .tag::before{content:'';display:block;width:22px;height:1px;background:var(--a)}
-.tt{font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.tt{font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 16px;margin-bottom:12px}
 .lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--m);margin-bottom:10px}
-textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;outline:none}
+textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:inherit;font-size:13px;line-height:1.6;outline:none}
 textarea{min-height:96px;resize:vertical}
-.btn{width:100%;padding:14px 20px;border-radius:8px;border:none;cursor:pointer;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(135deg,var(--a2),var(--a));color:#000}
+.btn{width:100%;padding:14px 20px;border-radius:8px;border:none;cursor:pointer;font-family: system-ui, -apple-system, sans-serif;font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(135deg,var(--a2),var(--a));color:#000}
 .rrow{display:flex;gap:8px;align-items:stretch}
 .ri{flex:1;cursor:pointer}
-.cpb{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;white-space:nowrap}
+.cpb{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:inherit;font-size:12px;white-space:nowrap}
 .cpb.ok{border-color:var(--ok);color:var(--ok)}
 .err{display:none;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.3);background:rgba(255,80,80,.08);color:#ff6b6b;font-size:13px}
 .err.on{display:block}
@@ -317,6 +318,7 @@ function doCopy(){
   });
 }
 
+// 优化 A：多 CDN 轮询 + 延迟按需加载
 function rqr(txt){
   var box=document.getElementById('qr');
   box.innerHTML='';
@@ -327,24 +329,49 @@ function rqr(txt){
     return;
   }
 
-  if(typeof QRious !== 'function'){
-    box.innerHTML='<div class="qre">QR组件加载失败，请检查网络或直接复制链接</div>';
-    return;
-  }
-  
-  try{
+  function drawQR() {
     var cv=document.createElement('canvas');
+    box.innerHTML='';
     box.appendChild(cv);
-    new QRious({
-      element: cv,
-      value: txt,
-      size: 220,
-      background: '#13131a',
-      foreground: '#00e5ff',
-      level: 'M'
-    });
-  } catch(e){
-    box.innerHTML='<div class="qre">二维码生成失败（请直接复制订阅链接）</div>';
+    try {
+      new QRious({
+        element: cv,
+        value: txt,
+        size: 220,
+        background: '#13131a',
+        foreground: '#00e5ff',
+        level: 'M'
+      });
+    } catch(e) {
+      box.innerHTML='<div class="qre">二维码生成失败（请直接复制订阅链接）</div>';
+    }
+  }
+
+  if(typeof QRious !== 'function'){
+    box.innerHTML='<div class="qre" style="color:var(--m)">正在加载组件...</div>';
+    
+    // CDN 轮询列表
+    var cdns = [
+      'https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js',
+      'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js',
+      'https://unpkg.com/qrious@4.0.2/dist/qrious.min.js'
+    ];
+    
+    function loadCDN(index) {
+      if (index >= cdns.length) {
+        box.innerHTML='<div class="qre">组件加载失败，请检查网络或直接复制链接</div>';
+        return;
+      }
+      var script = document.createElement('script');
+      script.src = cdns[index];
+      script.onload = drawQR;
+      script.onerror = function() { loadCDN(index + 1); };
+      document.head.appendChild(script);
+    }
+    
+    loadCDN(0);
+  } else {
+    drawQR();
   }
 }
 
@@ -359,7 +386,8 @@ document.addEventListener('DOMContentLoaded', function(){
 
 /* ---------------- Worker ---------------- */
 export default {
-  async fetch(request, env) {
+  // 注入 ctx 上下文用于 ctx.waitUntil
+  async fetch(request, env, ctx) {
     try {
       const cfg = await getCfg(env);
       const { a0, name, sc, sh, sp, fp } = cfg;
@@ -403,7 +431,8 @@ export default {
 
       if (!host || !uuid) return new Response("missing host/uuid", { status: 400 });
 
-      const { l1, l2 } = await getUpstreamsCached(cfg);
+      // 将 ctx 透传给缓存函数
+      const { l1, l2 } = await getUpstreamsCached(cfg, ctx);
       const all = Array.from(new Set([...a0, ...l1, ...l2])).filter(Boolean);
 
       const extra = ex.length ? "&" + ex.join("&") : "";
