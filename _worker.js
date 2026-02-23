@@ -71,7 +71,7 @@ async function fetchCSVList(tls) {
         const tlsValue = (row[tlsIndex] || '').toUpperCase();
         const speed = parseFloat(row[row.length - 1] || '0');
         if (tlsValue === tls.toUpperCase() && speed > DLS) {
-          result.push(`${row[0]}:${row[1]}#${row[tlsIndex + remarkIndex] || row[0]}`);
+          result.push(row[0] + ':' + row[1] + '#' + (row[tlsIndex + remarkIndex] || row[0]));
         }
       }
     } catch {}
@@ -192,35 +192,55 @@ export default {
 
     const apiList = await fetchAPIList(addressesapi);
     const csvList = await fetchCSVList("TRUE");
-    const all = Array.from(new Set(addresses.concat(apiList, csvList)));
+    const all = Array.from(new Set(addresses.concat(apiList, csvList))).filter(Boolean);
 
-    const content = all.map(addr=>{
-      let address=addr, port="443", remark=addr;
-      const m=addr.match(regex);
-      if(m){address=m[1];port=m[2]||port;remark=m[3]||address;}
-      return \`vless://\${uuid}@\${address}:\${port}?security=tls&sni=\${sni}&alpn=\${encodeURIComponent(alpn)}&fp=\${fp}&type=\${type}&host=\${host}&path=\${encodeURIComponent(path)}#\${encodeURIComponent(remark)}\`;
-    }).join("\\n");
+    const content = all.map(addr => {
+      let address = addr, port = "443", remark = addr;
+      const m = addr.match(regex);
+      if (m) { address = m[1]; port = m[2] || port; remark = m[3] || address; }
 
-    if (ua.includes("clash") || format==="clash"){
-      const self=url.href;
-      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=clash&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+      // 关键：不用反引号，不用模板字符串
+      return "vless://" + uuid + "@" + address + ":" + port
+        + "?security=tls"
+        + "&sni=" + encodeURIComponent(sni)
+        + "&alpn=" + encodeURIComponent(alpn)
+        + "&fp=" + encodeURIComponent(fp)
+        + "&type=" + encodeURIComponent(type)
+        + "&host=" + encodeURIComponent(host)
+        + "&path=" + encodeURIComponent(path)
+        + "&encryption=none"
+        + "#" + encodeURIComponent(remark);
+    }).join("\n");
+
+    if (ua.includes("clash") || format === "clash") {
+      const self = url.href;
+      const convUrl = subProtocol + "://" + subConverter
+        + "/sub?target=clash&url=" + encodeURIComponent(self)
+        + "&config=" + encodeURIComponent(subConfig);
+      const r = await fetch(convUrl);
       return new Response(await r.text());
     }
 
-    if (ua.includes("singbox") || format==="singbox"){
-      const self=url.href;
-      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=singbox&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+    if (ua.includes("singbox") || format === "singbox") {
+      const self = url.href;
+      const convUrl = subProtocol + "://" + subConverter
+        + "/sub?target=singbox&url=" + encodeURIComponent(self)
+        + "&config=" + encodeURIComponent(subConfig);
+      const r = await fetch(convUrl);
       return new Response(await r.text());
     }
 
-    if (ua.includes("surge") || format==="surge"){
-      const self=url.href;
-      const r=await fetch(\`\${subProtocol}://\${subConverter}/sub?target=surge&url=\${encodeURIComponent(self)}&config=\${encodeURIComponent(subConfig)}\`);
+    if (ua.includes("surge") || format === "surge") {
+      const self = url.href;
+      const convUrl = subProtocol + "://" + subConverter
+        + "/sub?target=surge&url=" + encodeURIComponent(self)
+        + "&config=" + encodeURIComponent(subConfig);
+      const r = await fetch(convUrl);
       return new Response(await r.text());
     }
 
     return new Response(safeBase64(content), {
-      headers: { "content-type": "text/plain" }
+      headers: { "content-type": "text/plain; charset=utf-8" }
     });
   }
 };
