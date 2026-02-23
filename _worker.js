@@ -195,7 +195,7 @@ async function getUpstreamsCached(cfg) {
   return obj;
 }
 
-/* ---------------- HTML ---------------- */
+/* ---------------- HTML (极简) ---------------- */
 function makeHTML(title) {
   const t = esc(title);
   return `<!doctype html><html lang="zh-CN"><head>
@@ -205,17 +205,15 @@ function makeHTML(title) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0a0a0f;--s:#13131a;--s2:#1c1c27;--b:#2a2a38;--a:#00e5ff;--a2:#7c3aed;--tx:#e8e8f0;--m:#6b6b80;--ok:#00ff9d;--w:#ffb800}
+:root{--bg:#0a0a0f;--s:#13131a;--s2:#1c1c27;--b:#2a2a38;--a:#00e5ff;--a2:#7c3aed;--tx:#e8e8f0;--m:#6b6b80;--ok:#00ff9d}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
 .wrap{width:100%;max-width:640px}
-.hd{margin-bottom:24px}
-.tag{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--a);opacity:.8;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.hd{margin-bottom:18px}
+.tag{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--a);opacity:.85;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .tag::before{content:'';display:block;width:22px;height:1px;background:var(--a)}
 .tt{font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.1;background:linear-gradient(135deg,var(--tx),var(--a));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.sub{margin-top:8px;font-size:13px;color:var(--m);display:flex;align-items:center;gap:6px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--w);animation:pulse 2s ease-in-out infinite}
-.card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:22px 20px;margin-bottom:12px}
+.card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 16px;margin-bottom:12px}
 .lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--m);margin-bottom:10px}
 textarea,input[type=text]{width:100%;background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;outline:none}
 textarea{min-height:96px;resize:vertical}
@@ -224,11 +222,6 @@ textarea{min-height:96px;resize:vertical}
 .ri{flex:1;cursor:pointer}
 .cpb{padding:12px 16px;border-radius:8px;border:1px solid var(--b);background:var(--s2);color:var(--tx);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;white-space:nowrap}
 .cpb.ok{border-color:var(--ok);color:var(--ok)}
-.fg{margin-top:14px}
-.fl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m);margin-bottom:7px;opacity:.6}
-.fs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-.f{padding:5px 11px;border-radius:6px;border:1px solid var(--b);background:transparent;color:var(--m);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px}
-.f.on{border-color:var(--a);color:var(--a);background:rgba(0,229,255,.08)}
 .err{display:none;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.3);background:rgba(255,80,80,.08);color:#ff6b6b;font-size:13px}
 .err.on{display:block}
 .rw{display:none;margin-top:12px}
@@ -236,13 +229,11 @@ textarea{min-height:96px;resize:vertical}
 #qr{margin-top:16px;display:flex;justify-content:center;min-height:24px}
 #qr .qre{font-size:12px;color:#ff6b6b;opacity:.95}
 #qr canvas{border-radius:10px;border:1px solid var(--b)}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
 </style></head><body>
 <div class="wrap">
   <div class="hd">
     <div class="tag">Subscription Generator</div>
     <h1 class="tt">${t}</h1>
-    <div class="sub"><span class="dot"></span>明文模式 — 已移除 SECRET（按钮切换 format 输出）</div>
   </div>
 
   <div class="card">
@@ -260,38 +251,6 @@ textarea{min-height:96px;resize:vertical}
         <input type="text" class="ri" id="ou" readonly>
         <button class="cpb" id="cb" type="button">复制</button>
       </div>
-
-      <div class="fg">
-        <div class="fl">常用</div>
-        <div class="fs" id="fmt1">
-          <button class="f on" type="button" data-fmt="">Base64</button>
-          <button class="f" type="button" data-fmt="clash">Clash</button>
-          <button class="f" type="button" data-fmt="clashr">ClashR</button>
-          <button class="f" type="button" data-fmt="singbox">Sing-Box</button>
-          <button class="f" type="button" data-fmt="v2ray">V2Ray</button>
-        </div>
-
-        <div class="fl">Surge</div>
-        <div class="fs" id="fmt2">
-          <button class="f" type="button" data-fmt="surge&ver=2">Surge 2</button>
-          <button class="f" type="button" data-fmt="surge&ver=3">Surge 3</button>
-          <button class="f" type="button" data-fmt="surge&ver=4">Surge 4</button>
-          <button class="f" type="button" data-fmt="surge&ver=5">Surge 5</button>
-        </div>
-
-        <div class="fl">其他</div>
-        <div class="fs" id="fmt3">
-          <button class="f" type="button" data-fmt="quan">Quantumult</button>
-          <button class="f" type="button" data-fmt="quanx">Quantumult X</button>
-          <button class="f" type="button" data-fmt="loon">Loon</button>
-          <button class="f" type="button" data-fmt="surfboard">Surfboard</button>
-          <button class="f" type="button" data-fmt="ss">SS (SIP002)</button>
-          <button class="f" type="button" data-fmt="sssub">SS Android</button>
-          <button class="f" type="button" data-fmt="ssr">SSR</button>
-          <button class="f" type="button" data-fmt="ssd">SSD</button>
-        </div>
-      </div>
-
       <div id="qr"></div>
     </div>
   </div>
@@ -309,22 +268,12 @@ function b64fix(s){
   return s;
 }
 
-function bld(f){
-  if(!u0)return '';
-  if(!f)return u0;
-  var sep=u0.indexOf('?')>=0?'&':'?';
-  if(f.indexOf('&')>=0){
-    var p=f.split('&');
-    return u0+sep+'format='+p[0]+'&'+p.slice(1).join('&');
-  }
-  return u0+sep+'format='+f;
-}
-
 function show(x){
   var rw=document.getElementById('rw');
   rw.className='rw on';
   document.getElementById('ou').value=x;
   rqr(x);
+  rw.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 function gen(){
@@ -351,15 +300,8 @@ function gen(){
       se('仅支持 vmess:// / vless:// / trojan://');
       return;
     }
-
-    // 默认选中 Base64
-    document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});
-    var first=document.querySelector('#fmt1 .f[data-fmt=""]');
-    if(first) first.classList.add('on');
-
-    show(bld(''));
-    document.getElementById('rw').scrollIntoView({behavior:'smooth',block:'nearest'});
-  } catch(e) {
+    show(u0);
+  } catch(e){
     se('解析失败：链接格式有误');
   }
 }
@@ -374,14 +316,13 @@ function doCopy(){
   });
 }
 
-// 关键修复：链接太长就不生成二维码（避免“失败”）
+// 经验阈值：URL 太长 QR 容易溢出（你示例这种长度肯定没问题）
 function rqr(txt){
   var box=document.getElementById('qr');
   box.innerHTML='';
   if(!txt)return;
 
-  // 经验阈值：URL 超过 ~900 字符，很多 QR 实现都会失败/溢出
-  if(txt.length>900){
+  if(txt.length>1200){
     box.innerHTML='<div class="qre">链接过长，无法生成二维码（请直接复制订阅链接）</div>';
     return;
   }
@@ -414,20 +355,9 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('genBtn').addEventListener('click', gen);
   document.getElementById('cb').addEventListener('click', doCopy);
   document.getElementById('ou').addEventListener('click', doCopy);
-
-  // 关键修复：统一绑定 format 按钮事件，点了必变
-  document.querySelectorAll('.f').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      if(!u0) return;
-      document.querySelectorAll('.f').forEach(function(x){x.classList.remove('on');});
-      btn.classList.add('on');
-      var f=btn.getAttribute('data-fmt')||'';
-      show(bld(f));
-    });
-  });
 });
 
-/* --- embedded QR encoder (保持你原来的版本，最小改动) --- */
+/* --- embedded QR encoder --- */
 (function(g){
 function QR8bitByte(d){this.mode=1;this.data=d;}
 QR8bitByte.prototype.getLength=function(){return this.data.length;};
@@ -489,7 +419,6 @@ QRCodeModel.prototype._setupTimingPattern=function(){
   }
 };
 QRCodeModel.prototype._setupTypeInfo=function(test,mp){
-  // 注意：这里库只支持 L/M 表，UI 用 M 没问题
   var ec=(this.errorCorrectLevel==='L')?1:0;
   var bits=QRCodeModel.getBCHTypeInfo((ec<<3)|mp);
   for(var i=0;i<15;i++){
@@ -577,12 +506,14 @@ export default {
       const ua = ((request.headers.get("User-Agent") || "") + "").toLowerCase();
       const fmt = ((url.searchParams.get("format") || "") + "").toLowerCase();
 
+      // 首页：极简生成器
       if (url.pathname !== "/sub") {
         return new Response(makeHTML(name), {
           headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
         });
       }
 
+      // /sub：生成 vless 列表 + 可选转换
       const KP = new Set(["host", "uuid", "password", "path", "sni", "type", "fp", "alpn", "security", "encryption", "format"]);
       let host = "",
         uuid = "",
@@ -593,6 +524,7 @@ export default {
       let qfp = normFP(url.searchParams.get("fp") || fp);
       let alpn = url.searchParams.get("alpn") || "";
 
+      // 透传其它参数（如 mode=auto / insecure=0 / allowInsecure=0 等）
       const ex = [];
       const seen = new Set(KP);
       for (const [k, v] of url.searchParams.entries()) {
@@ -640,6 +572,7 @@ export default {
             rk = m[3] || ad;
           }
 
+          // ipv6 包一下
           if (ad.includes(":") && !ad.startsWith("[")) ad = "[" + ad + "]";
 
           return prefix + ad + ":" + pt + "?" + qsFixed + "#" + encodeURIComponent(rk);
@@ -671,6 +604,7 @@ export default {
         });
       }
 
+      // 默认 base64 输出
       return new Response(b64(body), {
         headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
       });
