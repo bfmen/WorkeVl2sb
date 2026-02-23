@@ -204,7 +204,7 @@ async function getUpstreamsCached(cfg) {
 /* ---------------- HTML ---------------- */
 function makeHTML(title) {
   const t = esc(title);
-  const note = "明文模式 — 已移除 SECRET 功能（不再支持 data 加密参数）";
+  const note = "明文模式 — 已移除 SECRET 功能（format 按钮可切换输出）";
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
@@ -245,8 +245,9 @@ textarea::placeholder,input[type=text]::placeholder{color:var(--m);opacity:.6}
 .f{padding:5px 11px;border-radius:6px;border:1px solid var(--b);background:transparent;color:var(--m);cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;transition:all .2s;letter-spacing:.05em}
 .f:hover{border-color:var(--a2);color:var(--a2)}
 .f.on{border-color:var(--a);color:var(--a);background:rgba(0,229,255,.08)}
-#qr{margin-top:16px;display:flex;justify-content:center}
+#qr{margin-top:16px;display:flex;justify-content:center;min-height:20px}
 #qr canvas{border-radius:10px;border:1px solid var(--b)}
+#qr .qre{font-size:12px;color:#ff6b6b;opacity:.9}
 .err{display:none;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,80,80,.3);background:rgba(255,80,80,.08);color:#ff6b6b;font-size:13px}
 .err.on{display:block}
 .ft{margin-top:24px;font-size:11px;color:var(--m);text-align:center;opacity:.4}
@@ -267,40 +268,40 @@ textarea::placeholder,input[type=text]::placeholder{color:var(--m);opacity:.6}
     <textarea id="lk" placeholder="粘贴 vmess:// / vless:// / trojan:// 链接..."></textarea>
     <div class="err" id="er"></div>
   </div>
-  <button class="btn" onclick="gen()">⚡ 生成订阅链接</button>
+  <button class="btn" type="button" onclick="gen()">⚡ 生成订阅链接</button>
   <div class="rw" id="rw">
     <div class="card">
       <div class="lab">订阅链接</div>
       <div class="rrow">
         <input type="text" class="ri" id="ou" readonly onclick="doCopy()">
-        <button class="cpb" id="cb" onclick="doCopy()">复制</button>
+        <button class="cpb" id="cb" type="button" onclick="doCopy()">复制</button>
       </div>
       <div class="fg">
         <div class="fl">常用</div>
         <div class="fs">
-          <button class="f on" onclick="sw(this,'')">Base64</button>
-          <button class="f" onclick="sw(this,'clash')">Clash</button>
-          <button class="f" onclick="sw(this,'clashr')">ClashR</button>
-          <button class="f" onclick="sw(this,'singbox')">Sing-Box</button>
-          <button class="f" onclick="sw(this,'v2ray')">V2Ray</button>
+          <button class="f on" type="button" onclick="sw(this,'')">Base64</button>
+          <button class="f" type="button" onclick="sw(this,'clash')">Clash</button>
+          <button class="f" type="button" onclick="sw(this,'clashr')">ClashR</button>
+          <button class="f" type="button" onclick="sw(this,'singbox')">Sing-Box</button>
+          <button class="f" type="button" onclick="sw(this,'v2ray')">V2Ray</button>
         </div>
         <div class="fl">Surge</div>
         <div class="fs">
-          <button class="f" onclick="sw(this,'surge&ver=2')">Surge 2</button>
-          <button class="f" onclick="sw(this,'surge&ver=3')">Surge 3</button>
-          <button class="f" onclick="sw(this,'surge&ver=4')">Surge 4</button>
-          <button class="f" onclick="sw(this,'surge&ver=5')">Surge 5</button>
+          <button class="f" type="button" onclick="sw(this,'surge&ver=2')">Surge 2</button>
+          <button class="f" type="button" onclick="sw(this,'surge&ver=3')">Surge 3</button>
+          <button class="f" type="button" onclick="sw(this,'surge&ver=4')">Surge 4</button>
+          <button class="f" type="button" onclick="sw(this,'surge&ver=5')">Surge 5</button>
         </div>
         <div class="fl">其他</div>
         <div class="fs">
-          <button class="f" onclick="sw(this,'quan')">Quantumult</button>
-          <button class="f" onclick="sw(this,'quanx')">Quantumult X</button>
-          <button class="f" onclick="sw(this,'loon')">Loon</button>
-          <button class="f" onclick="sw(this,'surfboard')">Surfboard</button>
-          <button class="f" onclick="sw(this,'ss')">SS (SIP002)</button>
-          <button class="f" onclick="sw(this,'sssub')">SS Android</button>
-          <button class="f" onclick="sw(this,'ssr')">SSR</button>
-          <button class="f" onclick="sw(this,'ssd')">SSD</button>
+          <button class="f" type="button" onclick="sw(this,'quan')">Quantumult</button>
+          <button class="f" type="button" onclick="sw(this,'quanx')">Quantumult X</button>
+          <button class="f" type="button" onclick="sw(this,'loon')">Loon</button>
+          <button class="f" type="button" onclick="sw(this,'surfboard')">Surfboard</button>
+          <button class="f" type="button" onclick="sw(this,'ss')">SS (SIP002)</button>
+          <button class="f" type="button" onclick="sw(this,'sssub')">SS Android</button>
+          <button class="f" type="button" onclick="sw(this,'ssr')">SSR</button>
+          <button class="f" type="button" onclick="sw(this,'ssd')">SSD</button>
         </div>
       </div>
       <div id="qr"></div>
@@ -393,7 +394,14 @@ function rqr(txt){
   var box=document.getElementById('qr');
   box.innerHTML='';
   if(!txt)return;
+
+  if(typeof QRCode!=='function'){
+    box.innerHTML='<div class="qre">QRCode 未加载</div>';
+    return;
+  }
+
   try{
+    // 这里用 M（中等纠错），库已修复支持 L/M/Q/H
     var qr=QRCode(0,'M');
     qr.addData(txt);
     qr.make();
@@ -408,30 +416,38 @@ function rqr(txt){
       for(var col=0;col<n;col++)
         if(qr.isDark(r,col))
           ctx.fillRect(mg+col*sc,mg+r*sc,sc,sc);
-  } catch(e){}
+  } catch(e){
+    box.innerHTML='<div class="qre">二维码生成失败</div>';
+  }
 }
 
-/* --- embedded QR encoder (unchanged) --- */
+/* --- embedded QR encoder (修复 EC 映射) --- */
 (function(g){
 function QR8bitByte(d){this.mode=1;this.data=d;}
 QR8bitByte.prototype.getLength=function(){return this.data.length;};
 QR8bitByte.prototype.write=function(b){for(var i=0;i<this.data.length;i++)b.put(this.data.charCodeAt(i),8);};
+
 function QRBitBuffer(){this.buffer=[];this.length=0;}
 QRBitBuffer.prototype.get=function(i){return((this.buffer[Math.floor(i/8)]>>>(7-i%8))&1)===1;};
 QRBitBuffer.prototype.put=function(n,l){for(var i=0;i<l;i++)this.putBit(((n>>>(l-i-1))&1)===1);};
 QRBitBuffer.prototype.putBit=function(b){var i=Math.floor(this.length/8);if(this.buffer.length<=i)this.buffer.push(0);if(b)this.buffer[i]|=(0x80>>>(this.length%8));this.length++;};
+
 function QRPolynomial(n,s){var o=0;while(o<n.length&&n[o]===0)o++;this.num=new Array(n.length-o+s);for(var i=0;i<n.length-o;i++)this.num[i]=n[i+o];}
 QRPolynomial.prototype.get=function(i){return this.num[i];};
 QRPolynomial.prototype.getLength=function(){return this.num.length;};
 QRPolynomial.prototype.multiply=function(e){var n=new Array(this.getLength()+e.getLength()-1);for(var i=0;i<n.length;i++)n[i]=0;for(var i=0;i<this.getLength();i++)for(var j=0;j<e.getLength();j++)n[i+j]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(e.get(j)));return new QRPolynomial(n,0);};
 QRPolynomial.prototype.mod=function(e){if(this.getLength()-e.getLength()<0)return this;var r=QRMath.glog(this.get(0))-QRMath.glog(e.get(0));var n=new Array(this.getLength());for(var i=0;i<this.getLength();i++)n[i]=this.get(i);for(var i=0;i<e.getLength();i++)n[i]^=QRMath.gexp(QRMath.glog(e.get(i))+r);return new QRPolynomial(n,0).mod(e);};
+
 var QRMath={glog:function(n){if(n<1)throw new Error('glog');return QRMath.LOG_TABLE[n];},gexp:function(n){while(n<0)n+=255;while(n>=256)n-=255;return QRMath.EXP_TABLE[n];},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};
 for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;
 for(var i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];
 for(var i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;
+
 function QRRSBlock(t,d){this.totalCount=t;this.dataCount=d;}
+// 仍然只内置 L/M 表（够用）
 QRRSBlock.RS_BLOCK_TABLE={'1-L':[[1,26,19]],'1-M':[[1,26,16]],'2-L':[[1,44,34]],'2-M':[[1,44,28]],'3-L':[[1,70,55]],'3-M':[[1,70,44]],'4-L':[[1,100,80]],'4-M':[[2,50,32]],'5-L':[[1,134,108]],'5-M':[[2,67,43]],'6-L':[[2,86,68]],'6-M':[[4,43,27]],'7-L':[[2,98,78]],'7-M':[[4,49,31]],'8-L':[[2,121,97]],'8-M':[[2,60,38],[2,61,39]],'9-L':[[2,146,116]],'9-M':[[3,58,36],[2,59,37]],'10-L':[[2,86,68],[2,87,69]],'10-M':[[4,69,43],[1,70,44]]};
 QRRSBlock.getRSBlocks=function(tn,ec){var t=QRRSBlock.RS_BLOCK_TABLE[tn+'-'+ec];if(!t)throw new Error('bad type/ec');var l=[];for(var i=0;i<t.length;i++)for(var j=0;j<t[i][0];j++)l.push(new QRRSBlock(t[i][1],t[i][2]));return l;};
+
 function QRCodeModel(tn,ec){this.typeNumber=tn;this.errorCorrectLevel=ec;this.modules=null;this.moduleCount=0;this.dataCache=null;this.dataList=[];}
 QRCodeModel.prototype.addData=function(d){this.dataList.push(new QR8bitByte(d));this.dataCache=null;};
 QRCodeModel.prototype.isDark=function(r,c){return this.modules[r][c]===true;};
@@ -445,6 +461,7 @@ QRCodeModel.prototype.make=function(){
   }
   this._make(false,0);
 };
+
 QRCodeModel.prototype._make=function(test,mp){
   this.moduleCount=this.typeNumber*4+17;
   this.modules=[];
@@ -457,6 +474,7 @@ QRCodeModel.prototype._make=function(test,mp){
   if(!this.dataCache)this.dataCache=QRCodeModel.createData(this.typeNumber,this.errorCorrectLevel,this.dataList);
   this._mapData(this.dataCache,mp);
 };
+
 QRCodeModel.prototype._setupPositionProbePattern=function(row,col){
   for(var r=-1;r<=7;r++){
     if(row+r<=-1||this.moduleCount<=row+r)continue;
@@ -466,14 +484,19 @@ QRCodeModel.prototype._setupPositionProbePattern=function(row,col){
     }
   }
 };
+
 QRCodeModel.prototype._setupTimingPattern=function(){
   for(var i=8;i<this.moduleCount-8;i++){
     if(this.modules[i][6]==null)this.modules[i][6]=(i%2===0);
     if(this.modules[6][i]==null)this.modules[6][i]=(i%2===0);
   }
 };
+
+// 修复：EC 映射（L/M/Q/H）
+// 注意：本内置 RS 表只有 L/M，所以你用 Q/H 会在 getRSBlocks 抛错（但 UI 用的是 M）
 QRCodeModel.prototype._setupTypeInfo=function(test,mp){
-  var ec=(this.errorCorrectLevel==='L')?1:0;
+  var map={L:1,M:0,Q:3,H:2};
+  var ec = (map[this.errorCorrectLevel]!==undefined)?map[this.errorCorrectLevel]:0;
   var bits=QRCodeModel.getBCHTypeInfo((ec<<3)|mp);
   for(var i=0;i<15;i++){
     var m=(!test&&((bits>>i)&1)===1);
@@ -489,6 +512,7 @@ QRCodeModel.prototype._setupTypeInfo=function(test,mp){
   }
   this.modules[this.moduleCount-8][8]=(!test);
 };
+
 QRCodeModel.prototype._mapData=function(data,mp){
   var inc=-1,row=this.moduleCount-1,bi=7,by=0;
   for(var col=this.moduleCount-1;col>0;col-=2){
@@ -509,11 +533,13 @@ QRCodeModel.prototype._mapData=function(data,mp){
     }
   }
 };
+
 QRCodeModel.PAD0=0xEC;QRCodeModel.PAD1=0x11;
 QRCodeModel.getBCHTypeInfo=function(d){var x=d<<10;while(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)>=0)x^=(0x537<<(QRCodeModel.getBCHDigit(x)-QRCodeModel.getBCHDigit(0x537)));return((d<<10)|x)^0x5412;};
 QRCodeModel.getBCHDigit=function(d){var n=0;while(d!==0){n++;d>>>=1;}return n;};
 QRCodeModel.getMask=function(mp,i,j){return(i+j)%2===0;};
 QRCodeModel.getErrorCorrectPolynomial=function(ec){var a=new QRPolynomial([1],0);for(var i=0;i<ec;i++)a=a.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return a;};
+
 QRCodeModel.createData=function(tn,ec,dl){
   var rs=QRRSBlock.getRSBlocks(tn,ec);
   var buf=new QRBitBuffer();
@@ -525,6 +551,7 @@ QRCodeModel.createData=function(tn,ec,dl){
   while(true){if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD0,8);if(buf.length>=tot*8)break;buf.put(QRCodeModel.PAD1,8);}
   return QRCodeModel.createBytes(buf,rs);
 };
+
 QRCodeModel.createBytes=function(buf,rs){
   var off=0,mDc=0,mEc=0,dc=[],ec=[];
   for(var r=0;r<rs.length;r++){
@@ -543,6 +570,7 @@ QRCodeModel.createBytes=function(buf,rs){
   for(var i=0;i<mEc;i++)for(var r=0;r<rs.length;r++)if(i<ec[r].length)data[idx++]=ec[r][i];
   return data;
 };
+
 g.QRCode=function(t,l){return new QRCodeModel(t,l||'M');};
 })(window);
 </script>
@@ -579,7 +607,6 @@ export default {
       let qfp = normFP(url.searchParams.get("fp") || fp);
       let alpn = url.searchParams.get("alpn") || "";
 
-      // passthrough extra query params
       const ex = [];
       const seen = new Set(KP);
       for (const [k, v] of url.searchParams.entries()) {
@@ -601,7 +628,6 @@ export default {
 
       const extra = ex.length ? "&" + ex.join("&") : "";
 
-      // prebuild fixed query string to reduce encode cost
       const qsFixed =
         "security=tls" +
         "&sni=" + encodeURIComponent(sni) +
@@ -628,7 +654,6 @@ export default {
             rk = m[3] || ad;
           }
 
-          // if upstream provides naked IPv6, wrap it
           if (ad.includes(":") && !ad.startsWith("[")) ad = "[" + ad + "]";
 
           return prefix + ad + ":" + pt + "?" + qsFixed + "#" + encodeURIComponent(rk);
@@ -648,7 +673,7 @@ export default {
 
       let target = null;
       if (ua.includes("clash")) target = "clash";
-      if (ua.includes("singbox")) target = "singbox";
+      if (ua.includes("singbox") || ua.includes("sing-box")) target = "singbox";
       if (ua.includes("surge")) target = "surge";
       if (fmt) target = fmt.split("&")[0];
 
