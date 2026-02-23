@@ -1,6 +1,6 @@
-const D_SH = "SUBAPI.cmliussss.net",
+const D_SH = "sub.096000.xyz",
   D_SP = "https",
-  D_SC = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini",
+  D_SC = "https://raw.githubusercontent.com/org100/demo/main/nodnsleak.ini",
   D_NAME = "优选订阅生成器",
   D_FP = "chrome",
   D_DLS = 7,
@@ -506,3 +506,4 @@ export default {
     }
   },
 };
+
