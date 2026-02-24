@@ -5,9 +5,63 @@ const D_SH = "sub.096000.xyz",
   D_FP = "chrome",
   D_DLS = 7,
   D_RMK = 1,
-  D_ALPN = "h2"; // ✅ 默认 ALPN
+  D_ALPN = "h2";
 
-const R_ADDR = /^(\[[^\]]+\]|[\w.\-]+):?(\d+)?(?:#(.*))?$/;
+function parseAddrLine(addr) {
+  let t = (addr || "").trim();
+  if (!t) return null;
+
+  let ad = t, pt = "443", rk = t;
+  let remark = "";
+  const hashPos = t.indexOf("#");
+  if (hashPos >= 0) {
+    remark = t.slice(hashPos + 1);
+    t = t.slice(0, hashPos);
+  }
+  if (!t) return null;
+
+  // 1) [IPv6]:port
+  if (t.startsWith("[")) {
+    const rb = t.indexOf("]");
+    if (rb > 0) {
+      const ip = t.slice(1, rb);
+      let rest = t.slice(rb + 1);
+      if (rest.startsWith(":")) rest = rest.slice(1);
+      if (rest && /^\d+$/.test(rest)) {
+        const n = Number(rest);
+        if (n >= 1 && n <= 65535) pt = String(n);
+      }
+      ad = "[" + ip + "]";
+      rk = remark || ip;
+      return { ad, pt, rk };
+    }
+  }
+
+  // 2) domain/ip:port — 用最后一个 ":" 拆端口
+  const lastColon = t.lastIndexOf(":");
+  if (lastColon > 0) {
+    const left = t.slice(0, lastColon);
+    const right = t.slice(lastColon + 1);
+    if (/^\d+$/.test(right)) {
+      const n = Number(right);
+      if (n >= 1 && n <= 65535) {
+        // left 含 ":" 且不是 IPv6 → 脏行（如 example.com:443:1），跳过端口解析
+        if (!left.includes(":") || isIPHost(left)) {
+          ad = left;
+          pt = String(n);
+          rk = remark || left;
+          return { ad, pt, rk };
+        }
+      }
+    }
+  }
+
+  // 3) 没端口，当作纯 host
+  ad = t;
+  pt = "443";
+  rk = remark || ad;
+  return { ad, pt, rk };
+}
 
 let _C = null,
   _K = "";
@@ -18,7 +72,7 @@ function normFP(v) {
   return ["chrome", "firefox", "safari", "edge", "ios", "android", "random"].includes(s) ? s : D_FP;
 }
 
-async function parseList(x) {
+function parseList(x) {
   if (!x) return [];
   return x
     .replace(/[ \t|"'\r\n]+/g, ",")
@@ -28,16 +82,23 @@ async function parseList(x) {
     .filter(Boolean);
 }
 
-// 原生 Base64 编码，完美兼容 UTF-8 中文
 function b64(s) {
   return btoa(unescape(encodeURIComponent(s)));
 }
 
 function normSub(v) {
   if (!v) return { h: D_SH, p: D_SP };
-  if (v.startsWith("http://")) return { h: v.slice(7), p: "http" };
-  if (v.startsWith("https://")) return { h: v.slice(8), p: "https" };
-  return { h: v, p: "https" };
+  let h = v,
+    p = "https";
+  if (h.startsWith("http://")) {
+    h = h.slice(7);
+    p = "http";
+  } else if (h.startsWith("https://")) {
+    h = h.slice(8);
+    p = "https";
+  }
+  h = h.replace(/\/+$/, "");
+  return { h, p };
 }
 
 function esc(s) {
@@ -58,7 +119,64 @@ async function fto(u, ms) {
   }
 }
 
-// 延长超时、增加 UA 伪装、自动补全 https
+/* -------- domain helpers -------- */
+function stripBracketHost(h) {
+  h = (h || "").trim();
+  if (h.startsWith("[") && h.endsWith("]")) return h.slice(1, -1);
+  return h;
+}
+
+function isIPv4(x) {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(x)) return false;
+  return x.split(".").every((o) => {
+    const n = Number(o);
+    return n >= 0 && n <= 255;
+  });
+}
+
+function isIPv6(x) {
+  x = stripBracketHost(x).toLowerCase();
+  if (!x.includes(":")) return false;
+  const y = x.split("%")[0];
+  if (!/^[0-9a-f:.]+$/.test(y)) return false;
+  return true;
+}
+
+function isIPHost(h) {
+  const x = stripBracketHost(h).toLowerCase();
+  if (!x) return false;
+  if (isIPv4(x)) return true;
+  if (isIPv6(x)) return true;
+  return false;
+}
+
+function rootDomain(h) {
+  const x = stripBracketHost(h).toLowerCase();
+  if (!x || isIPHost(x)) return "";
+
+  const parts = x.split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+
+  const last2 = parts.slice(-2).join(".");
+
+  const SPECIAL_SUFFIXES = new Set([
+    "eu.org",
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "net.uk",
+    "sch.uk",
+  ]);
+
+  if (SPECIAL_SUFFIXES.has(last2)) {
+    return parts.slice(-3).join(".");
+  }
+
+  return last2;
+}
+
+/* ---------------- upstream fetch ---------------- */
 async function fetchAPI(arr) {
   if (!arr.length) return [];
   const out = [];
@@ -124,7 +242,7 @@ async function fetchCSV(arr, tls, dls, rmk) {
         if (ti === -1) return;
 
         for (const row of ds) {
-          if (!row || row.length < 2) continue;
+          if (!row || row.length <= ti) continue;
           if (((row[ti] || "") + "").toUpperCase() !== (tls + "").toUpperCase()) continue;
           if (!(parseFloat(row[row.length - 1] || "0") > dls)) continue;
 
@@ -144,6 +262,8 @@ async function fetchCSV(arr, tls, dls, rmk) {
 
 /* ---------- config + upstream ---------- */
 async function getCfg(env) {
+  // 环境变量在 Worker 生命周期内不会变，此缓存为 isolate 级永久缓存
+  // 若需热更新环境变量，必须重新部署
   const k = [
     env.ADD,
     env.ADDAPI,
@@ -154,15 +274,15 @@ async function getCfg(env) {
     env.FP,
     env.DLS,
     env.CSVREMARK,
-    env.ALPN, // ✅ ALPN 纳入缓存键
+    env.ALPN,
   ].join("|");
   if (_K === k && _C) return _C;
 
   const n = normSub(env.SUBAPI);
   _C = {
-    a0: env.ADD ? await parseList(env.ADD) : [],
-    a1: env.ADDAPI ? await parseList(env.ADDAPI) : [],
-    a2: env.ADDCSV ? await parseList(env.ADDCSV) : [],
+    a0: env.ADD ? parseList(env.ADD) : [],
+    a1: env.ADDAPI ? parseList(env.ADDAPI) : [],
+    a2: env.ADDCSV ? parseList(env.ADDCSV) : [],
     dls: Number(env.DLS) || D_DLS,
     rmk: Number(env.CSVREMARK) || D_RMK,
     name: env.SUBNAME || D_NAME,
@@ -176,13 +296,12 @@ async function getCfg(env) {
   return _C;
 }
 
-// 每次请求直接拉取最新节点
 async function getUpstreamsRealtime(cfg) {
   const [l1, l2] = await Promise.all([fetchAPI(cfg.a1), fetchCSV(cfg.a2, "TRUE", cfg.dls, cfg.rmk)]);
   return { l1, l2 };
 }
 
-/* ---------------- HTML (极简) ---------------- */
+/* ---------------- HTML ---------------- */
 function makeHTML(title, defAlpn) {
   const t = esc(title);
   const a = (defAlpn || "h2").toString().trim() || "h2";
@@ -249,7 +368,7 @@ function se(m){var e=document.getElementById('er');e.textContent=m;e.className='
 function he(){document.getElementById('er').className='err';}
 
 function b64fix(s){
-  s=(s||'').trim().replace(/-/g,'+').replace(/_/g,'/');
+  s=(s||'').trim().replace(/\s+/g,'').replace(/-/g,'+').replace(/_/g,'/');
   while(s.length%4)s+='=';
   return s;
 }
@@ -274,27 +393,38 @@ function gen(){
       var raw=atob(b64fix(l.slice(8)));
       var j=JSON.parse(raw);
       var alpn = (j.alpn || defAlpn);
+      var vmHost = (j.host || j.add || '').trim();
+      if (!vmHost) { se('vmess 链接缺少 host/add 字段'); return; }
+      var sniParam = (j.sni && String(j.sni).trim()) ? ('&sni='+encodeURIComponent(String(j.sni).trim())) : '';
 
-      u0=location.origin+'/sub?host='+encodeURIComponent(j.host||j.add||'')
+      u0=location.origin+'/sub?host='+encodeURIComponent(vmHost)
         +'&uuid='+encodeURIComponent(j.id||'')
         +'&path='+encodeURIComponent(j.path||'/')
-        +'&sni='+encodeURIComponent(j.sni||j.host||j.add||'')
+        + sniParam
         +'&type='+encodeURIComponent(j.net||'ws')
         +'&fp=chrome'
         +'&alpn='+encodeURIComponent(alpn);
 
     } else if(l.indexOf('vless://')===0||l.indexOf('trojan://')===0){
-      var uu=l.split('//')[1].split('@')[0];
-      var ap=l.split('@')[1]||'';
-      var qi=ap.indexOf('?');
-      var qs=qi>=0?ap.slice(qi+1).split('#')[0]:'';
+      var u;
+      try { u = new URL(l); } catch(e) { se('解析失败：链接格式有误'); return; }
 
-      var sp = new URLSearchParams(qs);
-      var alpn = sp.get('alpn') || defAlpn;
-      if(!sp.get('alpn')) sp.set('alpn', alpn);
+      var uu = decodeURIComponent(u.username || '');
+      var addr = u.hostname || '';
+
+      var sp = u.searchParams;
+
+      var h = (sp.get('host') || sp.get('sni') || addr || '').trim();
+      if(!h){ se('链接里缺少 host/sni，无法生成订阅'); return; }
+
+      var alpn2 = sp.get('alpn') || defAlpn;
+      if(!sp.get('alpn')) sp.set('alpn', alpn2);
+      sp.delete('host');
+      sp.delete('uuid');
+      sp.delete('password');
 
       var newQs = sp.toString();
-      u0=location.origin+'/sub?uuid='+encodeURIComponent(uu)+(newQs?('&'+newQs):'');
+      u0=location.origin+'/sub?host='+encodeURIComponent(h)+'&uuid='+encodeURIComponent(uu)+(newQs?('&'+newQs):'');
 
     } else {
       se('仅支持 vmess:// / vless:// / trojan://');
@@ -391,38 +521,24 @@ export default {
       const ua = ((request.headers.get("User-Agent") || "") + "").toLowerCase();
       const fmt = ((url.searchParams.get("format") || "") + "").toLowerCase();
 
-      // 首页：极简生成器
       if (url.pathname !== "/sub") {
         return new Response(makeHTML(name, defAlpn), {
           headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
         });
       }
 
-      // /sub：生成 vless 列表 + 可选转换
       const KP = new Set([
-        "host",
-        "uuid",
-        "password",
-        "path",
-        "sni",
-        "type",
-        "fp",
-        "alpn",
-        "security",
-        "encryption",
-        "format",
+        "host", "uuid", "password", "path", "sni", "type",
+        "fp", "alpn", "security", "encryption", "format",
       ]);
 
-      let host = "",
-        uuid = "",
-        path = "/",
-        sni = "",
-        type = "ws";
-
+      let host = "", uuid = "", path = "/", type = "ws";
       let qfp = normFP(url.searchParams.get("fp") || fp);
-      let alpn = url.searchParams.get("alpn") || defAlpn || "h2"; // ✅ 默认 h2
+      let alpn = (url.searchParams.get("alpn") || defAlpn || "h2").trim() || "h2";
+      let forcedSni = stripBracketHost((url.searchParams.get("sni") || "").trim());
+      forcedSni = forcedSni.replace(/\s+/g, "");
+      if (forcedSni.length > 255) forcedSni = "";
 
-      // 透传其它参数
       const ex = [];
       const seen = new Set(KP);
       for (const [k, v] of url.searchParams.entries()) {
@@ -431,84 +547,86 @@ export default {
         ex.push(encodeURIComponent(k) + "=" + encodeURIComponent(v));
       }
 
-      host = url.searchParams.get("host") || "";
-      uuid = url.searchParams.get("uuid") || url.searchParams.get("password") || "";
-      path = url.searchParams.get("path") || "/";
-      sni = url.searchParams.get("sni") || host;
-      type = url.searchParams.get("type") || "ws";
+      host = (url.searchParams.get("host") || "").trim();
+      uuid = (url.searchParams.get("uuid") || url.searchParams.get("password") || "").trim();
+      path = (url.searchParams.get("path") || "/").trim() || "/";
+      type = (url.searchParams.get("type") || "ws").trim() || "ws";
 
       if (!host || !uuid) return new Response("missing host/uuid", { status: 400 });
 
-      // 无缓存，纯实时拉取
+      let hostPlain = stripBracketHost(host).replace(/\s+/g, "");
+      if (!hostPlain) return new Response("missing host/uuid", { status: 400 });
+      const hostRoot = rootDomain(hostPlain);
+
       const { l1, l2 } = await getUpstreamsRealtime(cfg);
-      const all = Array.from(new Set([...a0, ...l1, ...l2])).filter(Boolean);
+      const all = Array.from(new Set([...a0, ...l1, ...l2]))
+        .map(s => (s || "").trim())
+        .filter(s => s && !s.startsWith("#"));
 
       const extra = ex.length ? "&" + ex.join("&") : "";
-
-      const qsFixed =
-        "security=tls" +
-        "&sni=" +
-        encodeURIComponent(sni) +
-        "&alpn=" +
-        encodeURIComponent(alpn) +
-        "&fp=" +
-        encodeURIComponent(qfp) +
-        "&type=" +
-        encodeURIComponent(type) +
-        "&host=" +
-        encodeURIComponent(host) +
-        "&path=" +
-        encodeURIComponent(path) +
-        "&encryption=none" +
-        extra;
-
       const prefix = "vless://" + uuid + "@";
 
       const body = all
         .map((addr) => {
-          let ad = addr,
-            pt = "443",
-            rk = addr;
+          const parsed = parseAddrLine(addr);
+          if (!parsed) return null;
+          const { ad, pt, rk } = parsed;
+          let ad2 = ad;
+          const adPlain = stripBracketHost(ad2);
 
-          const m = addr.match(R_ADDR);
-          if (m) {
-            ad = m[1];
-            pt = m[2] || pt;
-            rk = m[3] || ad;
+          let sniLine = hostPlain;
+          if (forcedSni) {
+            sniLine = forcedSni;
+          } else if (isIPHost(adPlain)) {
+            sniLine = hostPlain;
+          } else if (hostRoot && rootDomain(adPlain) === hostRoot) {
+            sniLine = adPlain;
+          } else {
+            sniLine = hostPlain;
           }
 
-          if (ad.includes(":") && !ad.startsWith("[")) ad = "[" + ad + "]";
+          const qsFixedLine =
+            "security=tls" +
+            "&sni=" + encodeURIComponent(sniLine) +
+            "&alpn=" + encodeURIComponent(alpn) +
+            "&fp=" + encodeURIComponent(qfp) +
+            "&type=" + encodeURIComponent(type) +
+            "&host=" + encodeURIComponent(hostPlain) +
+            "&path=" + encodeURIComponent(path) +
+            "&encryption=none" +
+            extra;
 
-          return prefix + ad + ":" + pt + "?" + qsFixed + "#" + encodeURIComponent(rk);
+          if (adPlain.includes(":") && !ad2.startsWith("[")) ad2 = "[" + adPlain + "]";
+
+          return prefix + ad2 + ":" + pt + "?" + qsFixedLine + "#" + encodeURIComponent(rk);
         })
+        .filter(Boolean)
         .join("\n");
 
       const convUrl = (t) =>
-        sp +
-        "://" +
-        sh +
-        "/sub?target=" +
-        t +
-        "&url=" +
-        encodeURIComponent(url.href) +
-        "&config=" +
-        encodeURIComponent(sc);
+        sp + "://" + sh +
+        "/sub?target=" + t +
+        "&url=" + encodeURIComponent(url.href) +
+        "&config=" + encodeURIComponent(sc);
+
+      const FMT_OK = new Set(["clash", "singbox", "surge"]);
+      const fmt2 = FMT_OK.has(fmt) ? fmt : "";
 
       let target = null;
       if (ua.includes("clash")) target = "clash";
-      if (ua.includes("singbox") || ua.includes("sing-box")) target = "singbox";
-      if (ua.includes("surge")) target = "surge";
-      if (fmt) target = fmt.split("&")[0];
+      else if (ua.includes("singbox") || ua.includes("sing-box")) target = "singbox";
+      else if (ua.includes("surge")) target = "surge";
 
-      if (target) {
-        const r = await fto(convUrl(fmt || target), 6500);
+      // fmt 显式指定优先，其次 UA 推断
+      const resolvedTarget = fmt2 || target;
+      if (resolvedTarget) {
+        const r = await fto(convUrl(resolvedTarget), 6500);
         if (!r || !r.ok) return new Response("convert upstream error", { status: 502 });
         return new Response(await r.text(), {
           headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
         });
       }
 
-      // 默认 base64 输出
       return new Response(b64(body), {
         headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
       });
