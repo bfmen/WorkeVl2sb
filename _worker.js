@@ -393,8 +393,8 @@ function gen(){
       var raw=atob(b64fix(l.slice(8)));
       var j=JSON.parse(raw);
       var alpn = (j.alpn || defAlpn);
-      var vmHost = (j.host || j.add || '').trim();
-      if (!vmHost) { se('vmess 链接缺少 host/add 字段'); return; }
+      var vmHost = (j.host || '').trim();
+      if (!vmHost) { se('vmess 链接缺少 host 伪装域名字段'); return; }
       var sniParam = (j.sni && String(j.sni).trim()) ? ('&sni='+encodeURIComponent(String(j.sni).trim())) : '';
 
       u0=location.origin+'/sub?host='+encodeURIComponent(vmHost)
@@ -414,8 +414,8 @@ function gen(){
 
       var sp = u.searchParams;
 
-      var h = (sp.get('host') || sp.get('sni') || addr || '').trim();
-      if(!h){ se('链接里缺少 host/sni，无法生成订阅'); return; }
+      var h = (sp.get('host') || sp.get('sni') || '').trim();
+      if(!h){ se('链接里缺少 host/sni 伪装域名，无法生成订阅'); return; }
 
       var alpn2 = sp.get('alpn') || defAlpn;
       if(!sp.get('alpn')) sp.set('alpn', alpn2);
@@ -556,7 +556,6 @@ export default {
 
       let hostPlain = stripBracketHost(host).replace(/\s+/g, "");
       if (!hostPlain) return new Response("missing host/uuid", { status: 400 });
-      const hostRoot = rootDomain(hostPlain);
 
       const { l1, l2 } = await getUpstreamsRealtime(cfg);
       const all = Array.from(new Set([...a0, ...l1, ...l2]))
@@ -574,15 +573,16 @@ export default {
           let ad2 = ad;
           const adPlain = stripBracketHost(ad2);
 
-          let sniLine = hostPlain;
+          let sniLine;
           if (forcedSni) {
+            // 用户强制指定
             sniLine = forcedSni;
           } else if (isIPHost(adPlain)) {
+            // IP 节点：用 host 伪装域名当 SNI
             sniLine = hostPlain;
-          } else if (hostRoot && rootDomain(adPlain) === hostRoot) {
-            sniLine = adPlain;
           } else {
-            sniLine = hostPlain;
+            // 域名节点（CF 优选域名）：用自身当 SNI
+            sniLine = adPlain;
           }
 
           const qsFixedLine =
