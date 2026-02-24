@@ -395,12 +395,10 @@ function gen(){
       var alpn = (j.alpn || defAlpn);
       var vmHost = (j.host || '').trim();
       if (!vmHost) { se('vmess 链接缺少 host 伪装域名字段'); return; }
-      var sniParam = (j.sni && String(j.sni).trim()) ? ('&sni='+encodeURIComponent(String(j.sni).trim())) : '';
 
       u0=location.origin+'/sub?host='+encodeURIComponent(vmHost)
         +'&uuid='+encodeURIComponent(j.id||'')
         +'&path='+encodeURIComponent(j.path||'/')
-        + sniParam
         +'&type='+encodeURIComponent(j.net||'ws')
         +'&fp=chrome'
         +'&alpn='+encodeURIComponent(alpn);
@@ -422,6 +420,7 @@ function gen(){
       sp.delete('host');
       sp.delete('uuid');
       sp.delete('password');
+      sp.delete('sni');
 
       var newQs = sp.toString();
       u0=location.origin+'/sub?host='+encodeURIComponent(h)+'&uuid='+encodeURIComponent(uu)+(newQs?('&'+newQs):'');
