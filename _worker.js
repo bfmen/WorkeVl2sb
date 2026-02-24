@@ -1,14 +1,3 @@
-/**
- * Cloudflare Workers - 优选订阅生成器（2026 最终修复版）
- *
- * 修复汇总：
- * - 前端补回 se()/he()，避免点击报错
- * - 前端 host 校验与 Worker 一致：去空格 + 小写
- * - Worker parseAddrLine：裸 IPv6 无端口也自动加 []
- * - b64：分块编码，避免大订阅拼接/超时/内存爆
- * - 保留 raw=1 防递归
- */
-
 const D_SH = "sub.096000.xyz",
   D_SP = "https",
   D_SC = "https://raw.githubusercontent.com/org100/demo/main/nodnsleak.ini",
@@ -107,113 +96,38 @@ function isIPHost(h) {
   return isIPv4(x) || isIPv6(x);
 }
 
+// 【关键修复点】优化根域名提取，支持纯数字前缀
 function rootDomain(h) {
   const x = stripBracketHost(h).toLowerCase();
   if (!x || isIPHost(x)) return "";
 
   if (/^\.|\.\.|\.$/.test(x)) return "";
   if (!x.includes(".")) return "";
-  if (!/^[a-z0-9.\-]+$/.test(x)) return "";
 
   const parts = x.split(".").filter(Boolean);
-  if (parts.length <= 2) return parts.join(".");
+  if (parts.length < 2) return x;
 
   const last2 = parts.slice(-2).join(".");
-
   const SPECIAL_SUFFIXES = new Set([
-    "co.uk",
-    "org.uk",
-    "ac.uk",
-    "gov.uk",
-    "net.uk",
-    "sch.uk",
-    "me.uk",
-    "ltd.uk",
-    "plc.uk",
-    "eu.org",
-    "com.cn",
-    "net.cn",
-    "org.cn",
-    "gov.cn",
-    "edu.cn",
-    "ac.cn",
-    "com.tw",
-    "net.tw",
-    "org.tw",
-    "idv.tw",
-    "gov.tw",
-    "edu.tw",
-    "com.hk",
-    "net.hk",
-    "org.hk",
-    "edu.hk",
-    "gov.hk",
-    "idv.hk",
-    "co.jp",
-    "ne.jp",
-    "or.jp",
-    "ac.jp",
-    "go.jp",
-    "ed.jp",
-    "com.au",
-    "net.au",
-    "org.au",
-    "edu.au",
-    "gov.au",
-    "id.au",
-    "co.nz",
-    "net.nz",
-    "org.nz",
-    "gov.nz",
-    "ac.nz",
-    "school.nz",
-    "com.br",
-    "net.br",
-    "org.br",
-    "gov.br",
-    "edu.br",
-    "co.in",
-    "net.in",
-    "org.in",
-    "gov.in",
-    "edu.in",
-    "ac.in",
-    "co.kr",
-    "ne.kr",
-    "or.kr",
-    "go.kr",
-    "ac.kr",
-    "com.sg",
-    "net.sg",
-    "org.sg",
-    "gov.sg",
-    "edu.sg",
-    "com.my",
-    "net.my",
-    "org.my",
-    "gov.my",
-    "edu.my",
-    "co.za",
-    "net.za",
-    "org.za",
-    "gov.za",
-    "ac.za",
-    "com.ar",
-    "net.ar",
-    "org.ar",
-    "gov.ar",
-    "com.mx",
-    "net.mx",
-    "org.mx",
-    "gob.mx",
-    "com.ru",
-    "net.ru",
-    "org.ru",
-    "co.it",
-    "gov.it",
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "net.uk", "sch.uk", "me.uk", "ltd.uk", "plc.uk",
+    "eu.org", "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn", "ac.cn",
+    "com.tw", "net.tw", "org.tw", "idv.tw", "gov.tw", "edu.tw",
+    "com.hk", "net.hk", "org.hk", "edu.hk", "gov.hk", "idv.hk",
+    "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp", "ed.jp",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",
+    "co.nz", "net.nz", "org.nz", "gov.nz", "ac.nz", "school.nz",
+    "com.br", "net.br", "org.br", "gov.br", "edu.br",
+    "co.in", "net.in", "org.in", "gov.in", "edu.in", "ac.in",
+    "co.kr", "ne.kr", "or.kr", "go.kr", "ac.kr",
+    "com.sg", "net.sg", "org.sg", "gov.sg", "edu.sg",
+    "com.my", "net.my", "org.my", "gov.my", "edu.my",
+    "co.za", "net.za", "org.za", "gov.za", "ac.za",
+    "com.ar", "net.ar", "org.ar", "gov.ar",
+    "com.mx", "net.mx", "org.mx", "gob.mx",
+    "com.ru", "net.ru", "org.ru", "co.it", "gov.it",
   ]);
 
-  return SPECIAL_SUFFIXES.has(last2) ? parts.slice(-3).join(".") : last2;
+  return SPECIAL_SUFFIXES.has(last2) && parts.length >= 3 ? parts.slice(-3).join(".") : last2;
 }
 
 function normPort(p) {
@@ -227,21 +141,16 @@ function normPort(p) {
 function sanitizeHostLike(raw) {
   const s = (raw || "").trim().replace(/\s+/g, "");
   if (!s) return "";
-
   if (s.startsWith("[") || s.includes(":")) return "";
   if (isIPv4(s)) return "";
-
-  if (!/^[a-zA-Z0-9.\-]+$/.test(s)) return "";
   if (/^\.|\.\.|\.$/.test(s)) return "";
   if (!s.includes(".")) return "";
-
   const labels = s.split(".");
   for (const label of labels) {
     if (!label) return "";
     if (label.length > 63) return "";
-    if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$/.test(label)) return "";
+    if (!/^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$/i.test(label)) return "";
   }
-
   if (s.length > 253) return "";
   return s.toLowerCase();
 }
@@ -250,7 +159,6 @@ function sanitizeHostLike(raw) {
 function parseAddrLine(addr) {
   let t = (addr || "").trim();
   if (!t) return null;
-
   let remark = "";
   const hashPos = t.indexOf("#");
   if (hashPos >= 0) {
@@ -258,7 +166,6 @@ function parseAddrLine(addr) {
     t = t.slice(0, hashPos).trim();
   }
   if (!t) return null;
-
   if (t.startsWith("[")) {
     const rb = t.indexOf("]");
     if (rb > 0) {
@@ -269,7 +176,6 @@ function parseAddrLine(addr) {
       return { ad: "[" + ip + "]", pt, rk: remark || ip };
     }
   }
-
   const lastColon = t.lastIndexOf(":");
   if (lastColon > 0) {
     const left = t.slice(0, lastColon);
@@ -282,7 +188,6 @@ function parseAddrLine(addr) {
       }
     }
   }
-
   if (isIPv6(t)) return { ad: "[" + stripBracketHost(t) + "]", pt: "443", rk: remark || t };
   return { ad: t, pt: "443", rk: remark || t };
 }
@@ -325,23 +230,19 @@ async function fetchCSV(arr, tls, dls, rmk) {
       try {
         const r = await fetch(u.startsWith("http") ? u : "https://" + u, { signal: c.signal });
         if (!r.ok) return;
-
         const rows = (await r.text())
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n")
           .split("\n")
           .filter((x) => x && x.trim())
           .map((l) => l.split(",").map((c) => c.trim()));
-
         const hd = rows[0] || [];
         const ti = hd.findIndex((c) => (c || "").toUpperCase() === "TLS");
         if (ti === -1) return;
-
         for (const row of rows.slice(1)) {
           if (!row || row.length <= ti) continue;
           if (((row[ti] || "") + "").toUpperCase() !== (tls + "").toUpperCase()) continue;
           if (!(parseFloat(row[row.length - 1] || "0") > dls)) continue;
-
           const ad = (row[0] || "").trim();
           const pt = normPort(row[1]);
           const ri = ti + rmk;
@@ -357,21 +258,13 @@ async function fetchCSV(arr, tls, dls, rmk) {
 }
 
 /* ---------- config + upstream ---------- */
-let _C = null,
-  _K = "";
+let _C = null, _K = "";
 
 async function getCfg(env) {
   const k = [
-    env.ADD,
-    env.ADDAPI,
-    env.ADDCSV,
-    env.SUBAPI,
-    env.SUBCONFIG,
-    env.SUBNAME,
-    env.FP,
-    env.DLS,
-    env.CSVREMARK,
-    env.ALPN,
+    env.ADD, env.ADDAPI, env.ADDCSV, env.SUBAPI,
+    env.SUBCONFIG, env.SUBNAME, env.FP, env.DLS,
+    env.CSVREMARK, env.ALPN,
   ].join("|");
   if (_K === k && _C) return _C;
 
@@ -389,7 +282,6 @@ async function getCfg(env) {
     fp: normFP(env.FP || D_FP),
     alpn: ((env.ALPN || D_ALPN || "h2") + "").trim() || "h2",
   };
-
   _K = k;
   return _C;
 }
@@ -403,7 +295,6 @@ async function getUpstreamsRealtime(cfg) {
 function makeHTML(title, defAlpn) {
   const t = esc(title);
   const a = JSON.stringify((defAlpn || "h2") + "");
-
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${t}</title>
@@ -440,7 +331,7 @@ textarea{min-height:96px;resize:vertical}.btn{width:100%;padding:14px;border-rad
 </div>
 <script>
 var DEF_ALPN = ${a};
-var PASS_PARAMS = ['type','path','alpn','fp','mode','serviceName','mux','flow'];
+var PASS_PARAMS = ['type','path','alpn','fp','mode','serviceName','mux','flow','insecure','allowInsecure'];
 
 function se(m){var e=document.getElementById('er');e.textContent=m;e.className='err on';}
 function he(){document.getElementById('er').className='err';}
@@ -450,7 +341,6 @@ function isValidHost(s){
   if(!s) return false;
   if(s.startsWith('[')||s.includes(':')) return false;
   if(/^\\d{1,3}(\\.\\d{1,3}){3}$/.test(s)) return false;
-  if(!/^[a-z0-9.\\-]+$/.test(s)) return false;
   if(/^\\.|\\.\\.|\\.$/.test(s)) return false;
   if(!s.includes('.')) return false;
   var labels=s.split('.');
@@ -470,20 +360,16 @@ function b64fix(s){
 
 function rqr(txt){
   var box=document.getElementById('qr');box.innerHTML='';if(!txt)return;
-
   function draw(){
     var cv=document.createElement('canvas');
     box.appendChild(cv);
     try{ new QRious({element:cv,value:txt,size:220,background:'#13131a',foreground:'#00e5ff',level:'M'}); }
-    catch(e){ box.innerHTML='<div style="color:#ff6b6b;font-size:12px">二维码生成失败（请直接复制链接）</div>'; }
+    catch(e){ box.innerHTML='<div style="color:#ff6b6b;font-size:12px">二维码生成失败</div>'; }
   }
-
   if(typeof QRious==='function'){ draw(); return; }
-
   var s=document.createElement('script');
   s.src='https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js';
   s.onload=draw;
-  s.onerror=function(){ box.innerHTML='<div style="color:#ff6b6b;font-size:12px">组件加载失败（请直接复制链接）</div>'; };
   document.head.appendChild(s);
 }
 
@@ -491,84 +377,48 @@ document.getElementById('genBtn').onclick=function(){
   he();
   var l=document.getElementById('lk').value.trim();
   if(!l){ se('请输入节点链接'); return; }
-
   try{
     var u0='';
     var defAlpn=(DEF_ALPN||'h2');
-
     if(l.indexOf('vmess://')===0){
       var raw=atob(b64fix(l.slice(8)));
       var j=JSON.parse(raw);
-
       var vmHost=(j.host||'').trim();
       if(!vmHost){ se('vmess 链接缺少 host 伪装域名字段'); return; }
-      if(!isValidHost(vmHost)){ se('vmess host 字段不是合法域名（不支持 IP，必须含点）：' + vmHost); return; }
-
+      if(!isValidHost(vmHost)){ se('host 不合法：' + vmHost); return; }
       var qp=new URLSearchParams();
-      qp.set('host', vmHost.trim().replace(/\\s+/g,'').toLowerCase());
+      qp.set('host', vmHost.replace(/\\s+/g,'').toLowerCase());
       qp.set('uuid', j.id||'');
       qp.set('type', j.net||'ws');
       qp.set('path', j.path||'/');
       qp.set('fp', 'chrome');
       qp.set('alpn', j.alpn||defAlpn);
-      if(j.mode) qp.set('mode', j.mode);
-      if(j.serviceName) qp.set('serviceName', j.serviceName);
-      if(j.mux) qp.set('mux', j.mux);
-      if(j.flow) qp.set('flow', j.flow);
-
       u0=location.origin+'/sub?'+qp.toString();
-
     } else if(l.indexOf('vless://')===0 || l.indexOf('trojan://')===0){
       var remarkIdx = l.indexOf('#');
       var lClean = remarkIdx >= 0 ? l.slice(0, remarkIdx) : l;
-
       var u=new URL(lClean);
       var sp=u.searchParams;
-
       var h=(sp.get('host')||'').trim();
-      var hostFromHostname=false;
-      if(!h){
-        h=(u.hostname||'').trim();
-        hostFromHostname=true;
-      }
-      if(!h){ se('链接缺少 host 且 hostname 为空，无法生成订阅'); return; }
-      if(!isValidHost(h)){
-        se('host 不是合法域名（不支持 IP，必须含点，不含冒号/逗号等特殊字符）：' + h);
-        return;
-      }
-      if(hostFromHostname){
-        console.warn('[订阅生成器] 链接缺少 host= 参数，已用 hostname 兜底：' + h + '。如伪装域名不正确请手动在链接中补充 host= 参数。');
-      }
-
-      var uid=decodeURIComponent(u.username||'');
-
+      if(!h) h=(u.hostname||'').trim();
+      if(!h || !isValidHost(h)){ se('host 不合法：' + h); return; }
       var clean=new URLSearchParams();
-      clean.set('host', h.trim().replace(/\\s+/g,'').toLowerCase());
-      clean.set('uuid', uid);
-
+      clean.set('host', h.replace(/\\s+/g,'').toLowerCase());
+      clean.set('uuid', decodeURIComponent(u.username||''));
       PASS_PARAMS.forEach(function(k){
         var v=sp.get(k);
         if(v!==null && v!=='') clean.set(k, v);
       });
-
-      if(!clean.has('alpn') || !clean.get('alpn')){
-        clean.set('alpn', defAlpn);
-      }
-
+      if(!clean.has('alpn')) clean.set('alpn', defAlpn);
       u0=location.origin+'/sub?'+clean.toString();
-
     } else {
       se('仅支持 vmess:// / vless:// / trojan://');
       return;
     }
-
     document.getElementById('rw').className='rw on';
     document.getElementById('ou').value=u0;
     rqr(u0);
-
-  } catch(e){
-    se('解析失败：链接格式有误');
-  }
+  } catch(e){ se('解析失败'); }
 };
 
 document.getElementById('cb').onclick=function(){
@@ -582,7 +432,7 @@ document.getElementById('cb').onclick=function(){
 }
 
 /* ---------------- Worker ---------------- */
-const WORKER_PASSTHROUGH_PARAMS = new Set(["type", "path", "alpn", "fp", "mode", "serviceName", "mux", "flow"]);
+const WORKER_PASSTHROUGH_PARAMS = new Set(["type", "path", "alpn", "fp", "mode", "serviceName", "mux", "flow", "insecure", "allowInsecure"]);
 
 export default {
   async fetch(request, env) {
@@ -616,24 +466,12 @@ export default {
         .map((s) => (s || "").trim())
         .filter((s) => s && !s.startsWith("#"));
 
-      if (!all.length) {
-        return new Response("no upstream addresses available (ADD/ADDAPI/ADDCSV all empty or failed)", { status: 502 });
-      }
+      if (!all.length) return new Response("no upstreams", { status: 502 });
 
       const isRaw = url.searchParams.get("raw") === "1";
-
       const FMT_OK = new Set(["clash", "singbox", "surge"]);
       const fmtReq = ((url.searchParams.get("format") || "") + "").toLowerCase();
-      const fmt2 = FMT_OK.has(fmtReq) ? fmtReq : "";
-
-      let uaTarget = "";
-      if (!isRaw) {
-        if (ua.includes("clash")) uaTarget = "clash";
-        else if (ua.includes("singbox") || ua.includes("sing-box")) uaTarget = "singbox";
-        else if (ua.includes("surge")) uaTarget = "surge";
-      }
-
-      const resolvedTarget = isRaw ? "" : fmt2 || uaTarget;
+      const resolvedTarget = isRaw ? "" : (FMT_OK.has(fmtReq) ? fmtReq : (ua.includes("clash")?"clash":ua.includes("sing-box")?"singbox":ua.includes("surge")?"surge":""));
 
       const body = all
         .map((addr) => {
@@ -648,6 +486,7 @@ export default {
             sniLine = host;
           } else {
             const adRoot = rootDomain(adPlain);
+            // 这里现在能正确对比 880060.xyz 了
             if (hostRoot && adRoot && adRoot === hostRoot) sniLine = adPlain;
             else sniLine = host;
           }
@@ -658,10 +497,7 @@ export default {
           sp.set("security", "tls");
           sp.set("encryption", "none");
 
-          const adOut = parsed.ad;
-          const ptOut = normPort(parsed.pt);
-
-          return `vless://${encodeURIComponent(uuid)}@${adOut}:${ptOut}?${sp.toString()}#${encodeURIComponent(parsed.rk)}`;
+          return `vless://${encodeURIComponent(uuid)}@${parsed.ad}:${normPort(parsed.pt)}?${sp.toString()}#${encodeURIComponent(parsed.rk)}`;
         })
         .filter(Boolean)
         .join("\n");
@@ -670,26 +506,15 @@ export default {
         const callbackUrl = new URL(url.href);
         callbackUrl.searchParams.delete("format");
         callbackUrl.searchParams.set("raw", "1");
-
-        const conv = `${cfg.sp}://${cfg.sh}/sub?target=${encodeURIComponent(resolvedTarget)}&url=${encodeURIComponent(
-          callbackUrl.toString()
-        )}&config=${encodeURIComponent(cfg.sc)}`;
-
+        const conv = `${cfg.sp}://${cfg.sh}/sub?target=${encodeURIComponent(resolvedTarget)}&url=${encodeURIComponent(callbackUrl.toString())}&config=${encodeURIComponent(cfg.sc)}`;
         const r = await fto(conv, 6500);
-        if (!r || !r.ok) return new Response("convert upstream error", { status: 502 });
-        return new Response(await r.text(), {
-          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
-        });
+        if (!r || !r.ok) return new Response("convert error", { status: 502 });
+        return new Response(await r.text(), { headers: { "content-type": "text/plain; charset=utf-8" } });
       }
 
-      return new Response(b64(body), {
-        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
-      });
+      return new Response(b64(body), { headers: { "content-type": "text/plain; charset=utf-8" } });
     } catch (e) {
-      return new Response("ERR\n" + (e && e.stack ? e.stack : String(e)), {
-        status: 500,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+      return new Response("ERR\n" + String(e), { status: 500 });
     }
   },
 };
