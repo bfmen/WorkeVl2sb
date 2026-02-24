@@ -93,24 +93,6 @@ https://your-worker.workers.dev/sub?...&format=surge
 
 ---
 
-## 🔒 加密订阅
-
-设置 `SECRET` 环境变量后，生成器页面会自动切换为加密模式。
-
-**明文模式：**
-```
-/sub?host=example.com&uuid=xxxx&path=/ws&...
-```
-
-**加密模式（设置 SECRET 后）：**
-```
-/sub?data=aBcDeFgH...（AES-GCM 加密密文）
-```
-
-uuid、host、path 等敏感参数全部隐藏在 `data=` 密文中，服务端解密后正常提供订阅内容。
-
----
-
 ## ⚠️ 注意事项
 
 ### 传输协议兼容性
@@ -118,7 +100,7 @@ uuid、host、path 等敏感参数全部隐藏在 `data=` 密文中，服务端�
 | 传输方式 | Cloudflare CDN 代理 | 直连（灰云）|
 |----------|--------------------|----|
 | WebSocket (`ws`) | ✅ 完全支持 | ✅ |
-| xhttp | ❌ 不支持，会报 `INTERNAL_ERROR` | ✅ |
+| xhttp | ✅ 完全支持 | ✅ |
 | gRPC | ⚠️ 需开启 gRPC 支持 | ✅ |
 
 > **经过 Cloudflare CDN 中转时，强烈建议使用 WebSocket 传输协议。**  
